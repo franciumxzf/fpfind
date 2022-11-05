@@ -1,1 +1,0 @@
-1. Some random thoughts: can we use non-linear regression to train the large data set we collected, to observe a relatively accurate parameter?
