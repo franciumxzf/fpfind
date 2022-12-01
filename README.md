@@ -1,8 +1,18 @@
-## Clock-sync
+# Clock-sync
+## `freqdetuneg2` 
+- `parse_timestamps.py`: used to convert the raw timestamp data into numpy array
+- `generate_freqdetuneg2.py`: used to artificially create the frequence drift
 
-- parse_timestamps: deal with the raw timestamp data
-- freqdetuneg2: generate_freqdetuneg2.py generates c1.dat, c4eX.dat from singletimestampnodelay.a1.dat, with the PNG illustrating the original peak and time delay (-14ns)
-- simulation: some primary work trying to understand the working principle of pfind
-- simulate_pfind: an improved version of simulation, try to test the algorithm with some data generated with random numbers; at this step, we tried to deal with the frequency shift, however, due to the memory limit, we didn't observe a good performance of this algorithm
-- time_freq.ipynb: a primary algorithm from the paper that can deal with the real timestamp data (need to use parse_timestamp.py), performance tbc.
-- time_freq.py: a cleaner version of the ipynb file, with some error fixed
+## `random`
+- `explain.md`: pseudo code to explain the algorithm
+- `g2_two_timestamps.py`: taken two timestamp datasets, a slow algorithm to find the cross correlation
+- `time_freq.py`: main algorithm
+
+
+
+## Update until Dec 1st
+<!-- 1. 32 bits integer (in the timestamp also) -->
+1. adjust size of k (+ k*delta_t) to compensate the negative value: this method works but always need to adjust k for different dataset, personally feel just cut from half and take plus minus works better
+2. plot the cross correlation diagram: refer to `time_freq_50_new.ipynb` for the diagram with compensation, `time_freq_50.ipynb` without compensation.
+3. try the python g2 code instead of fft: implemented the g2 method in `g2_two_timestamps.py`, tried but very slow...
+4. By changing different Ta, Ts and N, we found that the choice of our hyperparameters can actually affect the precision of our result. Therefore, we might need a systematic way to generate appropriate hyperparameters from the dataset itself. (Need to think that how can we achieve this, as in practice we totally know nothing about our data.)
