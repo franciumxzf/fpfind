@@ -17,4 +17,7 @@
 3. try the python g2 code instead of fft: implemented the g2 method in `g2_two_timestamps.py`, tried but very slow...
 4. By changing different Ta, Ts and N, we found that the choice of our hyperparameters can actually affect the precision of our result. Therefore, we might need a systematic way to generate appropriate hyperparameters from the dataset itself. (Need to think that how can we achieve this, as in practice we totally know nothing about our data.)
 -- Ongoing as I'm still not sure how to deal with this. Found that for the two 1e-5 drift datasets (10s and 100s), a set of parameter works perfectly for one but totally not working for the other. This happens for some other datasets too.
-5. Results: the algorithm works up to 1e-5
+5. Some results for now: 
+- The time and freq offset works together up to 1e-5, and looks the accuracy is quite high. The results can be found in `time_freq.py`. 
+- For 1e-4, I still believe that the algorithm can work but it doesn't for now... I found that for the 2000hz delay one alice is quite short (means after ~6*Ta it is empty), 1000hz one I plot all the cross correlation out and the peak is always not obvious; can refer to `time_freq_long.ipynb`
+- Another reason maybe is due to the memory limit that my bin number cannot go that high
