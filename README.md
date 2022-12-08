@@ -23,3 +23,10 @@ Update: it may not help, since the data itself is also stochastic. Suspect might
     - The time and freq offset works together up to 1e-5, and looks the accuracy is quite high. The results can be found in `time_freq.py`. 
     - For 1e-4, I still believe that the algorithm can work but it doesn't for now... I found that for the 2000hz delay one alice is quite short (means after ~6*Ta it is empty), 1000hz one I plot all the cross correlation out and the peak is always not obvious; can refer to `time_freq_long.ipynb`
     - Another reason maybe is due to the memory limit that my bin number cannot go that high
+
+## Update until Dec 8th
+This week mainly works on improving the g2lib. 
+
+Previously, the time complexity of g2 is O($n^3$). We tried to improve this by using slicing in the numpy array: `arr = arr[1:]`. By testing this method with a relatively smaller-size dataset, we obtained the same peak location as fft method, but the peak value is a bit different. (This is reasonable as the fft method involves complex number.)
+
+Currently we are trying to employ the g2lib in `time_freq_g2.py`. An example of this can be found in `time_freq_long.ipynb`.
