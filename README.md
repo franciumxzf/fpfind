@@ -43,8 +43,8 @@ Some things we learnt from new data:
 - Pair statistics does strongly influence whether peak can be easily found or not. Fails to converge for 1e-4 (later found, around 5e-5) when peak signal is poor.
 - Relative timestamp drift is only on the order of 2e-5, which is pfind can easily find even with poor peak.
 
-So in this way, if we know the upper limit of our algorithm (say 5e-5), we can manually apply the upper limit to bob, and let it run through the algorithm again. Ideally, the frequency result will be less than the upper limit, then run the algorithm again until it gives us 0 frequency result, and we can manually calculate the total frequency shift; or if we still get a non-sense number, we can increase the correction to 2 * upper limit and so on. With the final frequency offset value, we can find the time offset.
+Now, if we know the upper limit of our algorithm (say 5e-5), we can manually apply the upper limit to bob, and let it run through the algorithm again. Ideally, the frequency result will be less than the upper limit, then run the algorithm again until it gives us 0 frequency result, and we can manually calculate the total frequency shift; or if we still get a non-sense number, we can increase the correction to 2 * upper limit and so on. With the final frequency offset value, we can find the time offset.
 
-This method generally works. The only problem is that our condition to judge whether the algorithm has found the correct frequency value is somewhat random. An improved method is purposed (see `explain.md`) and we will work on it.
+This method generally works. The only problem is that our condition to tell whether the algorithm has found the correct frequency value is somewhat random. An improved method is purposed (see `explain.md`) and we will work on it.
 
 For now, we aim to fully resolve the freq offset for all the datasets (provided the data is sane), fix the time delay calculation. In the meantime, we will also work on the C code.
