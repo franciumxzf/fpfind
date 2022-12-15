@@ -30,3 +30,21 @@ This week mainly works on improving the g2lib.
 Previously, the time complexity of g2 is O($n^3$). We tried to improve this by using slicing in the numpy array: `arr = arr[1:]`. By testing this method with a relatively smaller-size dataset, we obtained the same peak location as fft method, but the peak value is a bit different. (This is reasonable as the fft method involves complex number.)
 
 Currently we are trying to employ the g2lib in `time_freq_g2.py`. An example of this can be found in `time_freq_long.ipynb`.
+
+## Update until Dec 15th
+We noticed some problems from the algorithm. Firstly, for the compensation method, different compensation actually changes the delay, and they are not really related to the compensation value. Secondly, if the frequency detune goes larger, $\Delta T_1$ and $\Delta T_2$ don't converge. In this way, we decided to give up the compensation method, and get the correct time offset value by performing one last pass of the frequency compensated dataset.
+
+This week we mainly works on making the algorithm work for longer frequency offset.
+
+Several new timestamp data were collected with various frequency detune to test the algorithm. More details can be found in `dataset_description.md`.
+
+Some things we learnt from new data:
+- Upper bound to algorithm with the current parameters is at least 1.5e-4, but only limited to strong peak.
+- Pair statistics does strongly influence whether peak can be easily found or not. Fails to converge for 1e-4 (later found, around 5e-5) when peak signal is poor.
+- Relative timestamp drift is only on the order of 2e-5, which is pfind can easily find even with poor peak.
+
+So in this way, if we know the upper limit of our algorithm (say 5e-5), we can manually apply the upper limit to bob, and let it run through the algorithm again. Ideally, the frequency result will be less than the upper limit, then run the algorithm again until it gives us 0 frequency result, and we can manually calculate the total frequency shift; or if we still get a non-sense number, we can increase the correction to 2 * upper limit and so on. With the final frequency offset value, we can find the time offset.
+
+This method generally works. The only problem is that our condition to judge whether the algorithm has found the correct frequency value is somewhat random. An improved method is purposed (see `explain.md`) and we will work on it.
+
+For now, we aim to fully resolve the freq offset for all the datasets (provided the data is sane), fix the time delay calculation. In the meantime, we will also work on the C code.
