@@ -49,9 +49,5 @@ This method generally works. The only problem is that our condition to tell whet
 
 For now, we aim to fully resolve the freq offset for all the datasets (provided the data is sane), fix the time delay calculation. In the meantime, we will also work on the C code.
 
-## Update until Dec 24th
-This week we continued to work on improving the upper limit of our code. We have deployed the algorithm of manually adding the frequency detune step size at one side. We tested on most datasets and all works well. However, the current code does not count for large negative frequency detune.
-
-We would like to use alice -> bob and bob -> alice to check whether the results are reasonable, but the current code only works for small frequency detune (less than the upper limit of `time_freq` function) when bob serves as the reference.
-
-Based on the result from the code, we found that there is a way that we maybe can tell whether we need to plus or minus the step size, but this method has some limitations and not always works well.
+## Update until Dec 29th
+In the past two weeks, we improved the `pfind` function as described in `explain.md`. This method can do manual detune for both sides concurrently. Dataset 9 - 27 have been tested and results are acceptable. Next step is to test the algorithm on all other datasets that we have and use `generate_freqdetuneg2.py` to design the test cases around this method.
