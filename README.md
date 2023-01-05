@@ -1,14 +1,20 @@
 # Clock-sync
+## data
+- `1_rawevents`, `20221123`, `20221209` and `20221212` contain the detailed results
+- `dataset_description.md`: descriptions of all datasets
+- `dataset_result.md`: generalized results with specified parameters and remarks
+- `time_freq_50.ipynb` and `time_freq_50_compensate.ipynb` show the difference of the plots when using different `find_max` function
+- `time_freq_g2lib.ipynb`: plots when using `g2_two_timestamps.py` method
+
 ## freqdetuneg2 
 - `parse_timestamps.py`: used to convert the raw timestamp data into numpy array
 - `generate_freqdetuneg2.py`: used to artificially create the frequence drift
 
-## random
+## main code
 - `explain.md`: pseudo code to explain the algorithm
 - `g2_two_timestamps.py`: taken two timestamp datasets, a slow algorithm to find the cross correlation
 - `time_freq.py`: main algorithm
-
-
+- `time_freq_g2.py`: main algorithm using `g2_two_timestamps.py` method (not updated as this method is very slow)
 
 ## Update until Dec 1st
 <!-- 1. 32 bits integer (in the timestamp also) -->
@@ -51,3 +57,6 @@ For now, we aim to fully resolve the freq offset for all the datasets (provided 
 
 ## Update until Dec 29th
 In the past two weeks, we improved the `pfind` function as described in `explain.md`. This method can do manual detune for both sides concurrently. Dataset 9 - 27 have been tested and results are acceptable. Next step is to test the algorithm on all other datasets that we have and use `generate_freqdetuneg2.py` to design the test cases around this method.
+
+## Update until Jan 5th
+The algorithm was tested with all datasets. A conservative upper limit for `time_freq` function is set to be 5e-5. The generalized result can be found in `dataset_result.md`.
