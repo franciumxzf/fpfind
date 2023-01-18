@@ -1,0 +1,6 @@
+# Ignore data directory and symlinks
+code/data
+
+# Ignore compiled python files
+**/__pycache__
+**/.pytest_cache
