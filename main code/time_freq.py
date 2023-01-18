@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import math
 from scipy.fft import fft, ifft
 
-UPPER_LIMIT = 7e-5
+UPPER_LIMIT = 5e-5
 TIMESTAMP_RESOLUTION = 256
 Ta = 2**29 #acquisition time interval
 Ts = 6 * Ta #separation time interval
