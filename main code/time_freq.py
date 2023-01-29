@@ -2,14 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 from scipy.fft import fft, ifft
+import sys
 
-UPPER_LIMIT = 5e-5
+UPPER_LIMIT = 5e-5 # put as an option
 TIMESTAMP_RESOLUTION = 256
-Ta = 2**29 #acquisition time interval
+Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
 S_th = 6 #significance limit
-delta_tmax = 1 # the maximum acceptable delta_t to start tracking
-N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm
+delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
+N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
 
 def read_a1(filename: str, legacy: bool = False):
     high_pos = 1; low_pos = 0
@@ -99,7 +100,7 @@ def time_freq(arr_a, arr_b):
             delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
             delta_T1 += delta_T1_correct
         
-        print(delta_T1, 0)
+        print(delta_T1, 0, file = sys.stderr)
         return delta_T1, 0
 
     arr_a -= T_start
@@ -133,7 +134,7 @@ def time_freq(arr_a, arr_b):
             break
 
     delta_u = 1 / u - 1
-    print(delta_T1, delta_u)
+    print(delta_T1, delta_u, file = sys.stderr)
     return delta_T1, delta_u
 
 def pfind(alice, bob): # perform plus and minus step size concurrently
@@ -213,7 +214,7 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    print(time_result, freq_result)
+    print(time_result, freq_result, file = sys.stderr) # here actually is just stdout, but we need to insert the standard deviation here
     return time_result, freq_result
 
 def result(alice_timestamp, bob_timestamp): #remember to change legacy setting, default is False
