@@ -247,24 +247,28 @@ def result(alice_timestamp, bob_timestamp): #remember to change legacy setting, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "")
     parser.add_argument("-d", help="RECEIVEFILES")
+    parser.add_argument("-x", action="store_true", help="alice legacy format")
     parser.add_argument("-D", help="T1FILES")
+    parser.add_argument("-X", action="store_true", help="bob legacy format") # may not be useful later but we just put here
     # parser.add_argument("-e", type = float, help="first overlapping epoch between the two remotes") # need to add this back when receive file from chopper
     parser.add_argument("-n", type = int, help = "number of epochs, Ta")
     parser.add_argument("-V", help = "verbosity")
     parser.add_argument("-q", type = int, help = "FFT buffer order, N")
-    parser.add_argument("-r", help="desired timing resolution")
+    parser.add_argument("-r", type = int, help="desired timing resolution")
 
 
     if len(sys.argv) > 1:
         args = parser.parse_args()
 
-        alice = read_a1(args.d, legacy = True)
-        bob = read_a1(args.D, legacy = True)
+        alice = read_a1(args.d, args.x)
+        bob = read_a1(args.D, args.X)
 
-        Ta = args.n
+        Ta = 2 ** args.n
         # T_start = args.e # maybe change in each iteration
         delta_tmax = args.r
-        N = args.q
+        N = 2 ** args.q
         Ts = 6 * Ta
 
         pfind(alice, bob)
+
+# python .\time_freq.py -d .\test_alice.dat -D .\test_bob.dat -n 29 -q 20 -r 1
