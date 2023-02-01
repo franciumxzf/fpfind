@@ -53,15 +53,6 @@ def statistical_significance(arr):
     S = (ck - ck_average) / np.std(arr_real)
     return S
 
-def process_timestamp1(arr, start_time, delta_t):
-    new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
-    new_arr -= start_time
-    bin_arr = np.zeros(N, dtype = np.int32)
-    #t/delta_t mod N
-    for i in range(np.size(new_arr)):
-        bin_arr[math.floor(new_arr[i] // delta_t) % N] = 1
-    return bin_arr
-
 def process_timestamp(arr, start_time, delta_t):
     new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
     bin_arr = np.zeros(N, dtype = np.int32)
@@ -73,11 +64,14 @@ def process_timestamp(arr, start_time, delta_t):
 def time_freq(arr_a, arr_b):
     delta_t = 256 #smallest discretization time, need to make this initial dt a free variable
 
-    #generate arrays according to equation (6)
     T_start = max(arr_a[0], arr_b[0])
+    arr_a -= T_start
+    arr_b -= T_start
+    T_start = 0
 
-    bin_arr_a1 = process_timestamp1(arr_a, T_start, delta_t)
-    bin_arr_b1 = process_timestamp1(arr_b, T_start, delta_t)
+    #generate arrays according to equation (6)
+    bin_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
+    bin_arr_b1 = process_timestamp(arr_b, T_start, delta_t)
     arr_c1 = cross_corr(bin_arr_a1, bin_arr_b1)
     
     while statistical_significance(arr_c1) <= S_th:
@@ -92,8 +86,8 @@ def time_freq(arr_a, arr_b):
     delta_T1 = find_max(arr_c1)[0] * delta_t
 
     #now the delta_t is already the effective time resolution
-    bin_arr_a2 = process_timestamp1(arr_a, T_start + Ts, delta_t)
-    bin_arr_b2 = process_timestamp1(arr_b, T_start + Ts, delta_t)
+    bin_arr_a2 = process_timestamp(arr_a, T_start + Ts, delta_t)
+    bin_arr_b2 = process_timestamp(arr_b, T_start + Ts, delta_t)
     arr_c2 = cross_corr(bin_arr_a2, bin_arr_b2)
     delta_T2 = find_max(arr_c2)[0] * delta_t
 
@@ -103,8 +97,8 @@ def time_freq(arr_a, arr_b):
         while delta_t > delta_tmax:
             delta_t = delta_t / (Ts / Ta / math.sqrt(2))
             new_arr_b = arr_b - delta_T1
-            new_arr_a1 = process_timestamp1(arr_a, T_start, delta_t)
-            new_arr_b1 = process_timestamp1(new_arr_b, T_start, delta_t)
+            new_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
+            new_arr_b1 = process_timestamp(new_arr_b, T_start, delta_t)
             new_arr_c1 = cross_corr(new_arr_a1, new_arr_b1)
 
             if statistical_significance(new_arr_c1) < 6: # if the peak is too low, high likely the result is wrong
@@ -115,10 +109,6 @@ def time_freq(arr_a, arr_b):
         
         print(delta_T1, 0, file = sys.stderr)
         return delta_T1, 0
- 
-    arr_a -= T_start
-    arr_b -= T_start
-    T_start = 0
 
     new_arr_b = (arr_b - delta_T1) / (1 - delta_u)
     delta_T1_correct = 0
