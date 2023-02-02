@@ -106,7 +106,7 @@ def time_freq(arr_a, arr_b):
 
             delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
             delta_T1 += delta_T1_correct
-        
+    
         print(delta_T1, 0, file = sys.stderr)
         return delta_T1, 0
 
@@ -139,6 +139,15 @@ def time_freq(arr_a, arr_b):
     delta_u = 1 / u - 1
     print(delta_T1, delta_u, file = sys.stderr)
     return delta_T1, delta_u
+
+def find_sigma(alice, bob):
+    T_start = max(alice[0], bob[0])
+    arr_a = process_timestamp(alice, T_start, delta_tmax)
+    arr_b = process_timestamp(bob, T_start, delta_tmax)
+    arr_c = cross_corr(arr_a, arr_b)
+    time, max_val, sigma = find_max(arr_c)
+    print(time * delta_tmax, max_val / sigma, file = sys.stderr)
+    return time, max_val / sigma
 
 def pfind(alice, bob): # perform plus and minus step size concurrently
     backup_bob = bob.copy()
@@ -203,7 +212,7 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
                 continue
             except ValueError:
                 always_plus = True
-        # need to set limit for plus & minus step size
+        # TODO: set limit for plus & minus step size, maybe 2.5e-4 is a reasonable value
         # if reach the limit still cannot obtain the correct result, means need to change the hyperparameters
     
     time_result, freq_shift1 = time_freq(alice, bob) # do another pass to double check
@@ -217,7 +226,9 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n", file = sys.stdout)
+    # TODO: calculate sigma - do a cross correlation, in the resolution of -r
+    time_result, sigma = find_sigma(alice, bob)
+    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\t{sigma:f}\n", file = sys.stdout)
     return time_result, freq_result
 
 # time result: units of 1ns
@@ -240,11 +251,14 @@ if __name__ == "__main__":
     parser.add_argument("-x", action="store_true", help="alice legacy format")
     parser.add_argument("-D", help="T1FILES")
     parser.add_argument("-X", action="store_true", help="bob legacy format") # may not be useful later but we just put here
-    # parser.add_argument("-e", type = float, help="first overlapping epoch between the two remotes") # need to add this back when receive file from chopper
-    parser.add_argument("-n", type = int, help = "number of epochs, Ta")
-    parser.add_argument("-V", help = "verbosity")
-    parser.add_argument("-q", type = int, help = "FFT buffer order, N")
-    parser.add_argument("-r", type = int, help="desired timing resolution")
+    parser.add_argument("-V", type = int, help = "verbosity")
+    # parser.add_argument("-e", help="first overlapping epoch between the two remotes") # need to add this back when receive file from chopper
+    # parser.add_argument("-n", type = int, help = "number of epochs")
+    # parser.add_argument("-q", type = int, help = "FFT buffer order")
+    parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
+    parser.add_argument("-n", type = int, default = 29, help = "acquisition time interval Ta = 2**n")
+    parser.add_argument("-q", type = int, default = 20, help = "bin number N = 2**q")
+    parser.add_argument("-s", type = float, default = 6, help = "statistical significance threshold")
 
 
     if len(sys.argv) > 1:
@@ -258,6 +272,7 @@ if __name__ == "__main__":
         delta_tmax = args.r
         N = 2 ** args.q
         Ts = 6 * Ta
+        S_th = args.s
 
         pfind(alice, bob)
 
