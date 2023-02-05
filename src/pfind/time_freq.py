@@ -10,7 +10,7 @@ TIMESTAMP_RESOLUTION = 256
 S_th = 6 #significance limit
 Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
-delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
+delta_tmax = 2 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
 
 def read_a1(filename: str, legacy: bool = False):
@@ -23,10 +23,6 @@ def read_a1(filename: str, legacy: bool = False):
     
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
-
-# Update:
-# 1. use only the real part from the cross correlation to calculate find_max and statistical_significance
-# 2. shall we calculate sigma using the same method as pfind.c or just this statistical significance?
 
 def find_max(arr):
     arr_real = arr.real
@@ -140,15 +136,6 @@ def time_freq(arr_a, arr_b):
     print(delta_T1, delta_u, file = sys.stderr)
     return delta_T1, delta_u
 
-def find_sigma(alice, bob):
-    T_start = max(alice[0], bob[0])
-    arr_a = process_timestamp(alice, T_start, delta_tmax)
-    arr_b = process_timestamp(bob, T_start, delta_tmax)
-    arr_c = cross_corr(arr_a, arr_b)
-    time, max_val, sigma = find_max(arr_c)
-    print(time * delta_tmax, max_val / sigma, file = sys.stderr)
-    return time, max_val / sigma
-
 def pfind(alice, bob): # perform plus and minus step size concurrently
     backup_bob = bob.copy()
     freq_result = 0
@@ -162,6 +149,9 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
     minus_bob = bob.copy()
     new_bob = bob / (1 + freq_shift1)
     while True:
+        if freq_result > 2.5e-4:
+            raise ValueError
+            # if reach the limit still cannot obtain the correct result, means need to change the hyperparameters
         try:
             time_result, freq_shift2 = time_freq(alice, new_bob)
             if abs(freq_shift2) < 5e-7 and abs(freq_shift2) <= abs(freq_shift1): # means that the the combined offset is correct
@@ -212,8 +202,6 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
                 continue
             except ValueError:
                 always_plus = True
-        # TODO: set limit for plus & minus step size, maybe 2.5e-4 is a reasonable value
-        # if reach the limit still cannot obtain the correct result, means need to change the hyperparameters
     
     time_result, freq_shift1 = time_freq(alice, bob) # do another pass to double check
     if abs(freq_shift1) <= abs(freq_shift2):
@@ -226,24 +214,11 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    # TODO: calculate sigma - do a cross correlation, in the resolution of -r
-    time_result, sigma = find_sigma(alice, bob)
-    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\t{sigma:f}\n", file = sys.stdout)
+    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n", file = sys.stdout)
     return time_result, freq_result
 
 # time result: units of 1ns
 # frequency result: units of 1e-12
-
-def result(alice_timestamp, bob_timestamp): #remember to change legacy setting, default is False
-    alice = read_a1(alice_timestamp)
-    bob = read_a1(bob_timestamp)
-    alice_time, alice_result = pfind(bob, alice) # bob as reference
-    alice = read_a1(alice_timestamp)
-    bob = read_a1(bob_timestamp)
-    bob_time, bob_result = pfind(alice, bob) # alice as reference
-    print((alice_result + 1) * (bob_result + 1), file = sys.stderr) # prove that frequency results converge
-    print(alice_time * (1 + alice_result) + bob_time, file = sys.stderr) # prove that time offset results converge
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "")
@@ -276,4 +251,4 @@ if __name__ == "__main__":
 
         pfind(alice, bob)
 
-# python .\time_freq.py -d .\test_alice.dat -D .\test_bob.dat -n 29 -q 20 -r 1
+# python3 time_freq.py -d ../data/20221212/20221212_dataset27_xHz_10kpps_e17_ch1.Aa1.dat -D ../data/20221212/20221212_dataset27_xHz_10kpps_e17_ch4.Aa1.dat -n 29 -q 20 -r 1
