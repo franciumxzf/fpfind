@@ -218,7 +218,11 @@ int main(int argc, char *argv[]) {
         // TODO: Highlight corresponding bug in chopper.c. Note that assigning
         //       to inbytesread directly can potentially corrupt events.
         inbytesread_next = read(inhandle, inbufferbytes_next, INBUFSIZE - inbytespartial);
-        if (!inbytesread_next) continue;  // TODO: 
+        if (inbytesread_next == 0) {
+            break;  // no bytes read (i.e. EOF)
+                    // TODO: Check if this should be continue instead,
+                    //       when running ad-infinitum
+        }
         if (inbytesread_next == -1) {
             fprintf(stderr, "Error %d on read", errno);
             break;  // graceful close
