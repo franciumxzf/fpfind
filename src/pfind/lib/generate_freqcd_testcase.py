@@ -22,10 +22,19 @@
 #
 #      ./generate_freqcd_testcase.py -o .input
 #
+#   4. Read timestamps from event supplied via command line or file
+#
+#      cat .input | ./generate_freqcd_testcase.py
+#      ./generate_freqcd_testcase.py .input
+#
 
 import argparse
+import pathlib
+import secrets
 import struct
 import sys
+
+import parse_timestamps as ts_parser
 
 LEGACY = False
 
@@ -50,6 +59,7 @@ if __name__ == "__main__":
     parser.add_argument("-o", help="output file, defaults to stdout stream")
     parser.add_argument("-t", type=int, nargs="+", help="list of timestamps in decimal")
     parser.add_argument("-x", action="store_true", help="legacy format")
+    parser.add_argument("infile", nargs="?", help="optional filename of events ('-' if reading from stdin)")
 
     if len(sys.argv) > 1:
         args = parser.parse_args()
@@ -62,11 +72,44 @@ if __name__ == "__main__":
             write = lambda e: fwrite(e, args.o)
             open(args.o, "wb").close()  # truncate file
 
+        # Different methods of reading timestamps
+        # 1. Read decimal timestamps from command line
+        #    e.g. "-t 0 1000 2000"
         if args.t:
-            # Read and validate list of integers
             for ts in args.t:
                 write(get_event(ts))
+
+        # 2. Read raw timestamps from file and print as decimal
+        #    e.g. "filename.dat"
+        # 3. Read raw timestamps from stdin
+        #    e.g. "-"
+        elif args.infile:
+            inputfile = args.infile
+
+            # Direct reading from stdin currently not supported
+            # instead creating a temporary file to store binary data
+            HAS_TEMP_FILE = args.infile == "-"
+            if HAS_TEMP_FILE:
+                inputfile = pathlib.Path(secrets.token_hex(5) + "_tempinput")
+            
+            # Read binary timestamps from file
+            try:
+                with open(inputfile, "wb") as f:
+                    f.write(sys.stdin.buffer.read())
+                
+                # Parsing binary timestamps
+                ts, _ = ts_parser.read_a1(inputfile, args.x)
+                for t in ts:
+                    print(int(t * ts_parser.TIMESTAMP_RESOLUTION))
+            
+            # Clean up
+            finally:
+                if HAS_TEMP_FILE:
+                    inputfile.unlink()
         
+        # 4. Read decimal timestamps from interactive prompt,
+        #    note output file in this case should be supplied.
+        #    This is only for testing purposes.
         else:
             # Read from stdin
             print("Enter timestamps in decimal separated by newlines.")

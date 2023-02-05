@@ -2,12 +2,16 @@ PACKAGE=pfind
 DIR=src/${PACKAGE}
 LIB=${DIR}/lib
 
-#.SILENT:
+.SILENT: shell
 .PHONY: clean
 
 all:
 	gcc -o ${DIR}/freqcd ${DIR}/freqcd.c ${LIB}/getopt.c
 	gcc -o tests/sample/example_hello tests/sample/example_hello.c
+shell:
+	-poetry shell
+pfind-shell:
+	-poetry run python -ic "import pfind"
 
 # Package-related stuff
 test:
