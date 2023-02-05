@@ -36,6 +36,14 @@ As the `pfind` library is installed in editable mode, some notes when developing
 
 Since the `poetry` package installed in this manner will tie it to the local Python installation, the `poetry.lock` should not be committed to the repository. Once onboarding instructions are changed to [system-wide installation](https://python-poetry.org/docs/), dependency locking should be enabled by removing `poetry.lock` from the `.gitignore` file.
 
+### Local installation
+
+If a local installation of `pfind` is desired, use the following command:
+
+```
+pip install -e .
+```
+
 ## Testing
 
 Tests can be run using `make test`, or equivalently:
