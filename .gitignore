@@ -1,6 +1,15 @@
 # Ignore data directory and symlinks
 code/data
 
-# Ignore compiled python files
+# Compiled C files
+src/pfind/freqcd
+
+# Compiled python files
 **/__pycache__
 **/.pytest_cache
+
+# poetry-related files
+poetry.lock
+
+# Sample tests
+tests/sample/example_hello
