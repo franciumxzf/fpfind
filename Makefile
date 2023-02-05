@@ -7,4 +7,5 @@ all:
 		./freqcd -f -999933 -o .output
 
 clean:
+	find . -type d -name ".pytest_cache" | xargs rm -rf
 	rm -f freqcd freqcd.exe .freqcd.input
