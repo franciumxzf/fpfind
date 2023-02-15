@@ -115,6 +115,9 @@ def read_T1(filename: str):
     
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
+
+    Raises:
+        ValueError: Number of epochs does not match length in header.
     """
     # Header details
     header = read_T1_header(filename)
@@ -192,6 +195,9 @@ def read_T2(filename: str):
     
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
+
+    Raises:
+        ValueError: Length and termination bits inconsistent with filespec.
     """
     # Header details
     header = read_T2_header(filename)
@@ -216,7 +222,6 @@ def read_T2(filename: str):
                 extract_bits(timeorder, buffer, size, f)
 
             # End-of-file check
-            # TODO: May need additional basebit == 0 check
             if timing == 1:
                 base, buffer, size = extract_bits(basebits, buffer, size, f)
                 if base != 0:
