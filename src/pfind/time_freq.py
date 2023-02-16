@@ -16,7 +16,15 @@ Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
 delta_tmax = 2 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
-    
+
+def read_a1(filename: str, legacy: bool = False):
+    high_pos = 1; low_pos = 0
+    if legacy: high_pos, low_pos = low_pos, high_pos
+    with open(filename, "rb") as f:
+        data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
+    t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10)) / TIMESTAMP_RESOLUTION
+    return t
+
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
 
@@ -215,6 +223,22 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
 # time result: units of 1ns
 # frequency result: units of 1e-12
 
+def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs):
+    epochs = os.listdir(dir_name)
+    for i in range(num_of_epochs):
+        epoch_name = dir_name + '/' + epochs[first_epoch + i - 1]
+        if file_type == 'T1':
+            if i == 0:
+                timestamp = read_T1(epoch_name)
+            else:
+                timestamp = np.append(timestamp, read_T1(epoch_name))
+        if file_type == 'T2':
+            if i == 0:
+                timestamp = read_T2(epoch_name)
+            else:
+                timestamp = np.append(timestamp, read_T2(epoch_name))
+    return timestamp
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "")
     parser.add_argument("-d", help="SENDFILES")
@@ -237,21 +261,10 @@ if __name__ == "__main__":
         # alice: low count side - chopper - HeadT2 - sendfiles
         # bob: high count side - chopper2 - HeadT1 - t1files
 
-        alice_epochs = os.listdir(args.d)
-        bob_epochs = os.listdir(args.D)
-        for i in range(num_of_epochs):
-            alice_epoch_name = args.d + '/' + alice_epochs[first_epoch + i - 1]
-            bob_epoch_name = args.D + '/' + bob_epochs[first_epoch + i - 1]
-            if i == 0:
-                alice = read_T2(alice_epoch_name)
-                bob = read_T1(bob_epoch_name)
-            else:
-                alice = np.append(alice, read_T2(alice_epoch_name))
-                bob = np.append(bob, read_T1(bob_epoch_name))
+        alice = get_timestamp(args.d, 'T2', args.e, args.n)
+        bob = get_timestamp(args.D, 'T1', args.e, args.n)
 
         delta_tmax = args.r
         N = 2 ** args.q
 
         pfind(alice, bob)
-
-# python3 time_freq.py -d ../data/20221212/20221212_dataset27_xHz_10kpps_e17_ch1.Aa1.dat -D ../data/20221212/20221212_dataset27_xHz_10kpps_e17_ch4.Aa1.dat -n 29 -q 20 -r 1
