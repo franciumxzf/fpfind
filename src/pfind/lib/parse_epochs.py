@@ -106,6 +106,12 @@ def epoch2date(epoch):
     total_seconds = int(epoch, base=16) << 32 * 125e-12
     return dt.datetime.fromtimestamp(total_seconds)
 
+def epoch2int(epoch):
+    return int(epoch, base=16)
+
+def int2epoch(value):
+    return hex(value)
+
 
 # Epoch readers
 # Implemented as per filespec [1]

@@ -7,7 +7,7 @@ import os
 from scipy.fft import fft, ifft
 import sys
 
-from pfind.lib.parse_epochs import read_T1, read_T2
+from pfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
 UPPER_LIMIT = 5e-5 # whether to put as an option
 TIMESTAMP_RESOLUTION = 256
@@ -223,20 +223,20 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
 # time result: units of 1ns
 # frequency result: units of 1e-12
 
-def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs):
-    epochs = os.listdir(dir_name)
+import pathlib
+
+def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs, sep):
+    epoch_dir = pathlib.Path(dir_name)
+    timestamp = np.array([], dtype=np.float64)
     for i in range(num_of_epochs):
-        epoch_name = dir_name + '/' + epochs[first_epoch + i - 1]
-        if file_type == 'T1':
-            if i == 0:
-                timestamp = read_T1(epoch_name)
-            else:
-                timestamp = np.append(timestamp, read_T1(epoch_name))
-        if file_type == 'T2':
-            if i == 0:
-                timestamp = read_T2(epoch_name)
-            else:
-                timestamp = np.append(timestamp, read_T2(epoch_name))
+        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + i)
+        reader = read_T1 if file_type == "T1" else read_T2
+        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
+        
+    for i in range(num_of_epochs):
+        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + sep + i)
+        reader = read_T1 if file_type == "T1" else read_T2
+        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
     return timestamp
 
 if __name__ == "__main__":
@@ -244,12 +244,12 @@ if __name__ == "__main__":
     parser.add_argument("-d", help="SENDFILES")
     parser.add_argument("-D", help="T1FILES")
     parser.add_argument("-V", type = int, help = "verbosity")
-    parser.add_argument("-e", type = int, help="first overlapping epoch between the two remotes")
-    parser.add_argument("-n", type = int, default = 10, help = "number of epochs")
+    parser.add_argument("-e", help="first overlapping epoch between the two remotes")
+    parser.add_argument("-n", type = int, default = 1, help = "number of epochs")
+    parser.add_argument("-s", type = int, default = 6, help = "number of separation epochs")
     parser.add_argument("-q", type = int, default = 20,  help = "FFT buffer order, N = 2**q")
     parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
-    # parser.add_argument("-n", type = int, default = 29, help = "acquisition time interval Ta = 2**n")
-    # parser.add_argument("-s", type = float, default = 6, help = "statistical significance threshold")
+    parser.add_argument("-S", type = float, default = 6, help = "statistical significance threshold")
 
 
     if len(sys.argv) > 1:
@@ -261,10 +261,11 @@ if __name__ == "__main__":
         # alice: low count side - chopper - HeadT2 - sendfiles
         # bob: high count side - chopper2 - HeadT1 - t1files
 
-        alice = get_timestamp(args.d, 'T2', args.e, args.n)
-        bob = get_timestamp(args.D, 'T1', args.e, args.n)
+        alice = get_timestamp(args.d, 'T2', args.e, args.n, args.s)
+        bob = get_timestamp(args.D, 'T1', args.e, args.n, args.s)
 
         delta_tmax = args.r
         N = 2 ** args.q
+        S_th = args.S
 
         pfind(alice, bob)
