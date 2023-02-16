@@ -217,7 +217,8 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n")
+    # print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n")
+    print(f"{int(time_result):d}\t{int(-freq_result / (1 + freq_result) * 2e34):d}\n")
     return time_result, freq_result
 
 # time result: units of 1ns
