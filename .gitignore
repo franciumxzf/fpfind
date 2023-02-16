@@ -13,3 +13,6 @@ poetry.lock
 
 # Sample tests
 tests/sample/example_hello
+
+# IDE
+.vscode
