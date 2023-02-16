@@ -1,5 +1,7 @@
 # Ignore data directory and symlinks
 code/data
+data
+data_win
 
 # Compiled C files
 src/pfind/freqcd
