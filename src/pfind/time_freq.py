@@ -1,9 +1,13 @@
 import argparse
 import numpy as np
+import logging
 import matplotlib.pyplot as plt
 import math
+import os
 from scipy.fft import fft, ifft
 import sys
+
+from pfind.lib.parse_epochs import read_T1, read_T2
 
 UPPER_LIMIT = 5e-5 # whether to put as an option
 TIMESTAMP_RESOLUTION = 256
@@ -12,14 +16,6 @@ Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
 delta_tmax = 2 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
-
-def read_a1(filename: str, legacy: bool = False):
-    high_pos = 1; low_pos = 0
-    if legacy: high_pos, low_pos = low_pos, high_pos
-    with open(filename, "rb") as f:
-        data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
-    t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10)) / TIMESTAMP_RESOLUTION
-    return t
     
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
@@ -72,8 +68,7 @@ def time_freq(arr_a, arr_b):
     
     while statistical_significance(arr_c1) <= S_th:
         if delta_t > 5e6: # if delta_t goes too large and still cannot find the peak, means need to change the hyperparameters
-            print("Cannot successfully find the peak!", file = sys.stderr)
-            raise ValueError
+            raise ValueError("Cannot successfully find the peak!")
         #halve the size of the array {ck} by adding entries pairwise
         arr_c1 = np.sum(arr_c1.reshape(-1, 2), axis = 1)
         delta_t *= 2 #doubles the effective time resolution
@@ -103,7 +98,7 @@ def time_freq(arr_a, arr_b):
             delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
             delta_T1 += delta_T1_correct
     
-        print(delta_T1, 0, file = sys.stderr)
+        logging.debug("time offset: %d, no frequency offset", delta_T1)
         return delta_T1, 0
 
     new_arr_b = (arr_b - delta_T1) / (1 - delta_u)
@@ -133,7 +128,7 @@ def time_freq(arr_a, arr_b):
             break
 
     delta_u = 1 / u - 1
-    print(delta_T1, delta_u, file = sys.stderr)
+    logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
     return delta_T1, delta_u
 
 def pfind(alice, bob): # perform plus and minus step size concurrently
@@ -150,7 +145,7 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
     new_bob = bob / (1 + freq_shift1)
     while True:
         if freq_result > 2.5e-4:
-            raise ValueError
+            raise ValueError("Reach algorithm limit")
             # if reach the limit still cannot obtain the correct result, means need to change the hyperparameters
         try:
             time_result, freq_shift2 = time_freq(alice, new_bob)
@@ -214,7 +209,7 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n", file = sys.stdout)
+    print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n")
     return time_result, freq_result
 
 # time result: units of 1ns
@@ -222,32 +217,40 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "")
-    parser.add_argument("-d", help="RECEIVEFILES")
-    parser.add_argument("-x", action="store_true", help="alice legacy format")
+    parser.add_argument("-d", help="SENDFILES")
     parser.add_argument("-D", help="T1FILES")
-    parser.add_argument("-X", action="store_true", help="bob legacy format") # may not be useful later but we just put here
     parser.add_argument("-V", type = int, help = "verbosity")
-    # parser.add_argument("-e", help="first overlapping epoch between the two remotes") # need to add this back when receive file from chopper
-    # parser.add_argument("-n", type = int, help = "number of epochs")
-    # parser.add_argument("-q", type = int, help = "FFT buffer order")
+    parser.add_argument("-e", type = int, help="first overlapping epoch between the two remotes")
+    parser.add_argument("-n", type = int, default = 10, help = "number of epochs")
+    parser.add_argument("-q", type = int, default = 20,  help = "FFT buffer order, N = 2**q")
     parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
-    parser.add_argument("-n", type = int, default = 29, help = "acquisition time interval Ta = 2**n")
-    parser.add_argument("-q", type = int, default = 20, help = "bin number N = 2**q")
-    parser.add_argument("-s", type = float, default = 6, help = "statistical significance threshold")
+    # parser.add_argument("-n", type = int, default = 29, help = "acquisition time interval Ta = 2**n")
+    # parser.add_argument("-s", type = float, default = 6, help = "statistical significance threshold")
 
 
     if len(sys.argv) > 1:
         args = parser.parse_args()
 
-        alice = read_a1(args.d, args.x)
-        bob = read_a1(args.D, args.X)
+        first_epoch = args.e
+        num_of_epochs = args.n
 
-        Ta = 2 ** args.n
-        # T_start = args.e # maybe change in each iteration
+        # alice: low count side - chopper - HeadT2 - sendfiles
+        # bob: high count side - chopper2 - HeadT1 - t1files
+
+        alice_epochs = os.listdir(args.d)
+        bob_epochs = os.listdir(args.D)
+        for i in range(num_of_epochs):
+            alice_epoch_name = args.d + '/' + alice_epochs[first_epoch + i - 1]
+            bob_epoch_name = args.D + '/' + bob_epochs[first_epoch + i - 1]
+            if i == 0:
+                alice = read_T2(alice_epoch_name)
+                bob = read_T1(bob_epoch_name)
+            else:
+                alice = np.append(alice, read_T2(alice_epoch_name))
+                bob = np.append(bob, read_T1(bob_epoch_name))
+
         delta_tmax = args.r
         N = 2 ** args.q
-        Ts = 6 * Ta
-        S_th = args.s
 
         pfind(alice, bob)
 
