@@ -47,6 +47,7 @@ class HeadT3(NamedTuple):
 # Extracted from ref [2]
 
 def read_T1_header(file_name: str):
+    file_name = str(file_name)
     with open(file_name, 'rb') as f:
         head_info = f.read(4 * 5)
     headt1 = HeadT1._make(unpack('iIIii', head_info))
@@ -57,6 +58,7 @@ def read_T1_header(file_name: str):
     return headt1
 
 def read_T2_header(file_name: str):
+    file_name = str(file_name)
     with open(file_name, 'rb') as f:
         head_info = f.read(4*6)
     headt2 = HeadT2._make(unpack('iIIiii', head_info))
@@ -67,6 +69,7 @@ def read_T2_header(file_name: str):
     return headt2
 
 def read_T3_header(file_name: str):
+    file_name = str(file_name)
     with open(file_name, 'rb') as f:
         head_info = f.read(4*4)
     headt3 = HeadT3._make(unpack('iIIi', head_info))
@@ -103,14 +106,14 @@ def epoch2date(epoch):
     Args:
         epoch: Epoch in hex format, e.g. "ba1f36c0".
     """
-    total_seconds = int(epoch, base=16) << 32 * 125e-12
+    total_seconds = (int(epoch, base=16) << 32) * 125e-12
     return dt.datetime.fromtimestamp(total_seconds)
 
 def epoch2int(epoch):
     return int(epoch, base=16)
 
 def int2epoch(value):
-    return hex(value)
+    return hex(value)[2:]
 
 
 # Epoch readers
@@ -215,7 +218,7 @@ def read_T2(filename: str):
     # Accumulators
     timestamps = []  # all timestamps, units of 125ps
     bases = []
-    timestamp = 0  # current timestamp, deltas stored in T2
+    timestamp = (header.epoch << 32) / 8 /  (32/TIMESTAMP_RESOLUTION) # current timestamp, deltas stored in T2
     buffer = 0
     size = 0  # number of bits in buffer
     with open(filename, "rb") as f:

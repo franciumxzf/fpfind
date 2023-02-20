@@ -235,7 +235,7 @@ def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs, sep):
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
         
     for i in range(num_of_epochs):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + sep + i)
+        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + sep * num_of_epochs + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
     return timestamp
