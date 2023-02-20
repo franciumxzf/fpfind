@@ -134,6 +134,10 @@ def read_T1(filename: str):
 
     timestamps = []
     bases = []
+
+    # For each timestamp event, 54-bits correspond to timestamp,
+    # of which 17-bit MSB is LSB of epoch, 37-bit LSB is 125ps resolution timestamp
+    epoch = (header.epoch >> 17) << 37
     with open(filename, "rb") as f:
         f.read(5 * 4)  # dump header
         while True:
@@ -147,7 +151,8 @@ def read_T1(filename: str):
             if value == 0:
                 break  # termination
 
-            timestamp = (value >> 10) / TIMESTAMP_RESOLUTION
+            # Timestamp in units of 4ps, stored in 54-bit MSB
+            timestamp = epoch + (value >> 10)
             timestamps.append(timestamp)
 
             base = value & 0b1111
@@ -156,8 +161,11 @@ def read_T1(filename: str):
     # Validity checks
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
-
-    return np.array(timestamps), np.array(bases)
+    
+    # Convert from units of 4ps to units of ns
+    timestamps = np.array(timestamps, dtype=np.float64)
+    timestamps *= (1/TIMESTAMP_RESOLUTION)
+    return timestamps, np.array(bases)
 
 
 def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
@@ -259,7 +267,7 @@ def read_T2(filename: str):
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
     
-    # Convert to units of ns
+    # Convert from units of 125ps to units of ns
     timestamps = np.array(timestamps, dtype=np.float64)
     timestamps *= (32/TIMESTAMP_RESOLUTION)
     return timestamps, np.array(bases)
