@@ -26,26 +26,78 @@ import numpy as np
 
 TIMESTAMP_RESOLUTION = 256  # units of 1/ns
     
-def read_a0(filename: str, legacy: bool = None):
+def read_a0(
+        filename: str,
+        legacy: bool = None,
+        float: bool = False,
+        raw: bool = False,
+    ):
+    """Converts a0 timestamp format into timestamps and detector pattern.
+    
+    If 'float' is True, then the output is returned as a 128-bit floating
+    point value in fractional units of 1 ns. Otherwise, 'float' is False
+    will return 64-bit integer values in multiples of 1 ns (the fractional
+    component is discarded).
+
+    If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns,
+    and the 'float' argument is ignored, since the timestamps are all ints.
+
+    Note:
+        128-bit floating point is required since 64-bit float only has a
+        precision of 53-bits (timestamps have precision of 54-bits). If
+        the bandwidth cost is too high when using 128-bit floats, then
+        chances are the application also does not require sub-ns precision.
+
+        Consider adding an option to return the raw timestamps in units
+        of 4ps directly, so no accuracy loss is expected.
+    """
     data = np.genfromtxt(filename, delimiter="\n", dtype="U8")
     data = np.array([int(v,16) for v in data]).reshape(-1, 2)
-    t = ((np.uint64(data[:, 1]) << 22) + (data[:, 0] >> 10)) / TIMESTAMP_RESOLUTION
+    t = ((np.uint64(data[:, 1]) << 22) + (data[:, 0] >> 10))
+    if not raw:
+        if float:
+            t = np.array(t, dtype=np.float128)
+        # Convert to units of ns
+        t = t / TIMESTAMP_RESOLUTION
+    
     p = data[:, 0] & 0xF
     return t, p
 
-def read_a1(filename: str, legacy: bool = False):
+def read_a1(
+        filename: str,
+        legacy: bool = False,
+        float: bool = False,
+        raw: bool = False,
+    ):
     high_pos = 1; low_pos = 0
     if legacy: high_pos, low_pos = low_pos, high_pos
     with open(filename, "rb") as f:
         data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
-    t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10)) / TIMESTAMP_RESOLUTION
+    t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
+    if not raw:
+        if float:
+            t = np.array(t, dtype=np.float128)
+        # Convert to units of ns
+        t = t / TIMESTAMP_RESOLUTION
+    
     p = data[:, low_pos] & 0xF
     return t, p
 
-def read_a2(filename: str, legacy: bool = None):
+def read_a2(
+        filename: str,
+        legacy: bool = None,
+        float: bool = False,
+        raw: bool = False,
+    ):
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
     data = np.array([int(v,16) for v in data])
-    t = (np.uint64(data >> 10)) / TIMESTAMP_RESOLUTION
+    t = np.uint64(data >> 10)
+    if not raw:
+        if float:
+            t = np.array(t, dtype=np.float128)
+        # Convert to units of ns
+        t = t / TIMESTAMP_RESOLUTION
+    
     p = data & 0xF
     return t, p
 
