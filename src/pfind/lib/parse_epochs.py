@@ -22,7 +22,12 @@ logger = logging.getLogger(__name__)
 
 TIMESTAMP_RESOLUTION = 256
 
-class TSRES(enum.enum):
+class TSRES(enum.Enum):
+    """Stores timestamp resolution information.
+    
+    Values assigned correspond to the number of units within a
+    span of 1 nanosecond.
+    """
     NS1 = 1
     PS125 = 8
     PS4 = 256
@@ -242,7 +247,8 @@ def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
 def read_T2(
         filename: str,
         full_epoch: bool = False,
-        resolution: str = TSRES.PS4,
+        inres: TSRES = TSRES.PS125,
+        outres: TSRES = TSRES.NS1,
     ):
     """Returns timestamp and detector information from T2 files.
     
@@ -252,9 +258,14 @@ def read_T2(
     Raises:
         ValueError: Length and termination bits inconsistent with filespec.
     """
-    if resolution not in (TSRES.PS125, TSRES.NS1):
+    if inres is not TSRES.PS125:
         raise ValueError(
-            "Timestamp resolution can only be one of (TSRES.PS125, TSRES.NS1)"
+            "'inres' only accepts 'TSRES.PS125': "
+            "T2 epoch files have hardcoded resolution of 125ps."
+        )
+    if outres not in TSRES:
+        raise ValueError(
+            "Timestamp resolution must be one of enumeration TSRES"
         )
 
     # Header details
@@ -307,23 +318,22 @@ def read_T2(
     # Validity checks
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
-   
     
-    # Different encoding, see documentation
-    if full_epoch and resolution is TSRES.PS4:
-
-    if full:
+    # Add epoch if required
+    epoch = header.epoch << 32 if full_epoch else 0
+    
+    # Check if need to store floating point
+    if outres is TSRES.NS1:
         timestamps = np.array(timestamps, dtype=np.float128)
-        timestamps = timestamps + np.float128(header.epoch << 32)
-    else:
+        timestamps += np.float128(epoch)
+        timestamps = timestamps / TSRES.PS125.value
+
+    elif outres is TSRES.PS125:
         timestamps = np.array(timestamps, dtype=np.uint64)
-    
-    if not raw:
-        # Convert from units of 4ps to units of ns
-        timestamps = timestamps/TIMESTAMP_RESOLUTION
-    return timestamps, np.array(bases) 
-    # Convert from units of 125ps to units of ns
-    timestamps = np.array(timestamps, dtype=np.float128)
-    timestamps = ((timestamps * (32/TIMESTAMP_RESOLUTION)))
+        timestamps += np.uint64(epoch)
+
+    else:
+        raise ValueError(f"Unsupported 'outres' value of {outres}")
+
     return timestamps, np.array(bases)
     

@@ -39,8 +39,7 @@ def read_a0(
     will return 64-bit integer values in multiples of 1 ns (the fractional
     component is discarded).
 
-    If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns,
-    and the 'float' argument is ignored, since the timestamps are all ints.
+    If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns.
 
     Note:
         128-bit floating point is required since 64-bit float only has a
@@ -54,12 +53,12 @@ def read_a0(
     data = np.genfromtxt(filename, delimiter="\n", dtype="U8")
     data = np.array([int(v,16) for v in data]).reshape(-1, 2)
     t = ((np.uint64(data[:, 1]) << 22) + (data[:, 0] >> 10))
-    if not raw:
-        if float:
-            t = np.array(t, dtype=np.float128)
-        # Convert to units of ns
-        t = t / TIMESTAMP_RESOLUTION
-    
+    if float:
+        t = np.array(t, dtype=np.float128)
+        if not raw:
+            t = t / TIMESTAMP_RESOLUTION
+    elif not raw:
+        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
     p = data[:, 0] & 0xF
     return t, p
 
@@ -74,12 +73,12 @@ def read_a1(
     with open(filename, "rb") as f:
         data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
     t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
-    if not raw:
-        if float:
-            t = np.array(t, dtype=np.float128)
-        # Convert to units of ns
-        t = t / TIMESTAMP_RESOLUTION
-    
+    if float:
+        t = np.array(t, dtype=np.float128)
+        if not raw:
+            t = t / TIMESTAMP_RESOLUTION
+    elif not raw:
+        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
     p = data[:, low_pos] & 0xF
     return t, p
 
@@ -92,12 +91,12 @@ def read_a2(
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
     data = np.array([int(v,16) for v in data])
     t = np.uint64(data >> 10)
-    if not raw:
-        if float:
-            t = np.array(t, dtype=np.float128)
-        # Convert to units of ns
-        t = t / TIMESTAMP_RESOLUTION
-    
+    if float:
+        t = np.array(t, dtype=np.float128)
+        if not raw:
+            t = t / TIMESTAMP_RESOLUTION
+    elif not raw:
+        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
     p = data & 0xF
     return t, p
 
