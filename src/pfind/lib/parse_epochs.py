@@ -134,12 +134,16 @@ def int2epoch(value):
 def read_T1(
         filename: str,
         full_epoch: bool = False,
-        outres: TSRES = TSRES.NS1,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
     ):
     """Returns timestamp and detector information from T1 files.
     
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
+
+    By default, the function returns timestamps in units of 1ns with as
+    high a resolution as possible (i.e. including fractional values).
     
     TODO
 
@@ -193,30 +197,35 @@ def read_T1(
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
     
-    # Add epoch if required
-    epoch = header.epoch >> 17
+    # Add epoch if required, at most 32-17 = 15 bits
+    epoch_msb = header.epoch >> 17
     
+    # Right now in units of 4ps
     # Check if need to store floating point
-    if outres is TSRES.NS1:
+    if fractional:
+        # Convert to desired resolution
         timestamps = np.array(timestamps, dtype=np.float128)
-        if full_epoch:
-            timestamps += np.float128(epoch << 54)
-        timestamps = timestamps / TSRES.PS4.value
+        timestamps = timestamps / (TSRES.PS4.value/resolution.value) 
+        epoch_msb = np.float128(epoch_msb << 54)
+        epoch_msb = epoch_msb / (TSRES.PS4.value/resolution.value)
 
-    elif outres is TSRES.PS125:
-        timestamps = np.array(timestamps, dtype=np.uint64)
-        timestamps = timestamps >> 5
-        if full_epoch:
-            timestamps += np.uint64(epoch << (54-5))
+    # Python integer objects can be arbitrarily long
+    elif resolution in (TSRES.PS4,):
+        timestamps = np.array(timestamps, dtype=object)
+        epoch_msb = int(epoch_msb) << 54
     
-    elif outres is TSRES.PS4:
-        timestamps = np.array(timestamps, dtype=np.float128)
-        if full_epoch:
-            timestamps += np.float128(epoch << 54)
-            
+    # Everything of resolution 125 ps and larger can fit
+    # in 64-bit unsigned integer, i.e. PS125, NS1.
     else:
-        raise ValueError(f"Unsupported 'outres' value of {outres}")
+        bitdiff = round(np.log2(TSRES.PS4.value/resolution.value))
+        timestamps = np.array(timestamps, dtype=np.uint64)
+        timestamps = timestamps >> bitdiff
+        epoch_msb = np.uint64(epoch_msb) << (54-bitdiff)
 
+    # Add epoch
+    if full_epoch:
+        timestamps += epoch_msb
+    
     return timestamps, np.array(bases)
 
 
