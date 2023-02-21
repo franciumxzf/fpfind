@@ -119,12 +119,30 @@ def int2epoch(value):
 # Epoch readers
 # Implemented as per filespec [1]
 
-def read_T1(filename: str):
+def read_T1(
+        filename: str,
+        full: bool = False,
+        raw: bool = False,
+    ):
     """Returns timestamp and detector information from T1 files.
     
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
+    
+    'full' is False by default, which indicates only the raw-timestamp
+    -equivalent information is returned, i.e. timestamp in units of 1ns
+    stored as a 64-bit integer.
+    'full' set to True returns full timestamps (timestamps + full epoch
+    information) stored as 128-bit float.
+    The reason for this difference is due to the full timestamp taking up
+    more than 64-bits equivalent information in units of 1ns, so only a
+    float can support this dynamic range.
 
+    Note 128-bit float has precision of 113 bits, while 64-bit float only has
+    53-bit precision (insufficient resolution).
+
+    If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns.
+    
     Raises:
         ValueError: Number of epochs does not match length in header.
     """
@@ -137,7 +155,7 @@ def read_T1(filename: str):
 
     # For each timestamp event, 54-bits correspond to timestamp,
     # of which 17-bit MSB is LSB of epoch, 37-bit LSB is 125ps resolution timestamp
-    epoch = (header.epoch >> 17) << 37
+    epoch = (header.epoch >> 17) << 54
     with open(filename, "rb") as f:
         f.read(5 * 4)  # dump header
         while True:
@@ -152,7 +170,7 @@ def read_T1(filename: str):
                 break  # termination
 
             # Timestamp in units of 4ps, stored in 54-bit MSB
-            timestamp = epoch + (value >> 10)
+            timestamp = value >> 10
             timestamps.append(timestamp)
 
             base = value & 0b1111
@@ -162,9 +180,16 @@ def read_T1(filename: str):
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
     
-    # Convert from units of 4ps to units of ns
-    timestamps = np.array(timestamps, dtype=np.float64)
-    timestamps *= (1/TIMESTAMP_RESOLUTION)
+    # Different encoding, see documentation
+    if full:
+        timestamps = np.array(timestamps, dtype=np.float128)
+        timestamps = timestamps + np.float128(epoch)
+    else:
+        timestamps = np.array(timestamps, dtype=np.uint64)
+    
+    if not raw:
+        # Convert from units of 4ps to units of ns
+        timestamps = timestamps/TIMESTAMP_RESOLUTION
     return timestamps, np.array(bases)
 
 
