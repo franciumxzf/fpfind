@@ -29,7 +29,7 @@ TIMESTAMP_RESOLUTION = 256  # units of 1/ns
 def read_a0(
         filename: str,
         legacy: bool = None,
-        float: bool = False,
+        float: bool = True,
         raw: bool = False,
     ):
     """Converts a0 timestamp format into timestamps and detector pattern.
@@ -65,7 +65,7 @@ def read_a0(
 def read_a1(
         filename: str,
         legacy: bool = False,
-        float: bool = False,
+        float: bool = True,
         raw: bool = False,
     ):
     high_pos = 1; low_pos = 0
@@ -85,7 +85,7 @@ def read_a1(
 def read_a2(
         filename: str,
         legacy: bool = None,
-        float: bool = False,
+        float: bool = True,
         raw: bool = False,
     ):
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
