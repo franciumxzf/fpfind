@@ -320,7 +320,10 @@ def read_T2(
         raise ValueError("Number of epochs do not match length specified in header")
     
     # Add epoch if required
-    epoch = header.epoch << 32 if full_epoch else 0
+    epoch = header.epoch
+    if not full_epoch:
+        epoch = header.epoch & ((1 << 17) - 1)
+    epoch <<= 32
     
     # Check if need to store floating point
     if outres is TSRES.NS1:
