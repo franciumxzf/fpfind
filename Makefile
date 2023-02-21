@@ -40,7 +40,7 @@ uninstall:
 # Read timestamp as hex / binary (little-endian 32-bit words)
 read:
 	@-xxd -e -g 4 -c 8 $(READ_ARGS) | cut -b11-27 |\
-	   	xxd -r -p - | xxd -b -g 4 -c 8 | cut -b1-76
+	   	xxd -r -p - | xxd -b -g 4 -c 8 | cut -b1-75
 readx:
 	@-xxd -e -g 4 -c 8 $(READ_ARGS) | cut -b1-27
 
