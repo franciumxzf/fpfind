@@ -9,6 +9,7 @@ References:
     [2] Epoch header definitions: https://github.com/s-fifteen-instruments/QKDServer/blob/master/S15qkd/utils.py
 """
 
+import enum
 import datetime as dt
 import logging
 from struct import unpack
@@ -20,6 +21,12 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 TIMESTAMP_RESOLUTION = 256
+
+class TSRES(enum.enum):
+    NS1 = 1
+    PS125 = 8
+    PS4 = 256
+
 
 class HeadT1(NamedTuple):
     tag: int
@@ -232,7 +239,11 @@ def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
     return msb, buffer, size
 
 
-def read_T2(filename: str):
+def read_T2(
+        filename: str,
+        full_epoch: bool = False,
+        resolution: str = TSRES.PS4,
+    ):
     """Returns timestamp and detector information from T2 files.
     
     Timestamp and detector information follow the formats specified in
@@ -241,6 +252,11 @@ def read_T2(filename: str):
     Raises:
         ValueError: Length and termination bits inconsistent with filespec.
     """
+    if resolution not in (TSRES.PS125, TSRES.NS1):
+        raise ValueError(
+            "Timestamp resolution can only be one of (TSRES.PS125, TSRES.NS1)"
+        )
+
     # Header details
     header = read_T2_header(filename)
     timeorder = header.timeorder
@@ -251,7 +267,7 @@ def read_T2(filename: str):
     # Accumulators
     timestamps = []  # all timestamps, units of 125ps
     bases = []
-    timestamp = (header.epoch << 32) / 8 /  (32/TIMESTAMP_RESOLUTION) # current timestamp, deltas stored in T2
+    timestamp = 0  # current timestamp, deltas stored in T2
     buffer = 0
     size = 0  # number of bits in buffer
     with open(filename, "rb") as f:
@@ -291,9 +307,23 @@ def read_T2(filename: str):
     # Validity checks
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
+   
     
+    # Different encoding, see documentation
+    if full_epoch and resolution is TSRES.PS4:
+
+    if full:
+        timestamps = np.array(timestamps, dtype=np.float128)
+        timestamps = timestamps + np.float128(header.epoch << 32)
+    else:
+        timestamps = np.array(timestamps, dtype=np.uint64)
+    
+    if not raw:
+        # Convert from units of 4ps to units of ns
+        timestamps = timestamps/TIMESTAMP_RESOLUTION
+    return timestamps, np.array(bases) 
     # Convert from units of 125ps to units of ns
-    timestamps = np.array(timestamps, dtype=np.float64)
-    timestamps *= (32/TIMESTAMP_RESOLUTION)
+    timestamps = np.array(timestamps, dtype=np.float128)
+    timestamps = ((timestamps * (32/TIMESTAMP_RESOLUTION)))
     return timestamps, np.array(bases)
     
