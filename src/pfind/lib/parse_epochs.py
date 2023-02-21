@@ -133,14 +133,16 @@ def int2epoch(value):
 
 def read_T1(
         filename: str,
-        full: bool = False,
-        raw: bool = False,
+        full_epoch: bool = False,
+        outres: TSRES = TSRES.NS1,
     ):
     """Returns timestamp and detector information from T1 files.
     
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
     
+    TODO
+
     'full' is False by default, which indicates only the raw-timestamp
     -equivalent information is returned, i.e. timestamp in units of 1ns
     stored as a 64-bit integer.
@@ -167,7 +169,6 @@ def read_T1(
 
     # For each timestamp event, 54-bits correspond to timestamp,
     # of which 17-bit MSB is LSB of epoch, 37-bit LSB is 125ps resolution timestamp
-    epoch = (header.epoch >> 17) << 54
     with open(filename, "rb") as f:
         f.read(5 * 4)  # dump header
         while True:
@@ -192,16 +193,30 @@ def read_T1(
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
     
-    # Different encoding, see documentation
-    if full:
-        timestamps = np.array(timestamps, dtype=np.float128)
-        timestamps = timestamps + np.float128(epoch)
-    else:
-        timestamps = np.array(timestamps, dtype=np.uint64)
+    # Add epoch if required
+    epoch = header.epoch >> 17
     
-    if not raw:
-        # Convert from units of 4ps to units of ns
-        timestamps = timestamps/TIMESTAMP_RESOLUTION
+    # Check if need to store floating point
+    if outres is TSRES.NS1:
+        timestamps = np.array(timestamps, dtype=np.float128)
+        if full_epoch:
+            timestamps += np.float128(epoch << 54)
+        timestamps = timestamps / TSRES.PS4.value
+
+    elif outres is TSRES.PS125:
+        timestamps = np.array(timestamps, dtype=np.uint64)
+        timestamps = timestamps >> 5
+        if full_epoch:
+            timestamps += np.uint64(epoch << (54-5))
+    
+    elif outres is TSRES.PS4:
+        timestamps = np.array(timestamps, dtype=np.float128)
+        if full_epoch:
+            timestamps += np.float128(epoch << 54)
+            
+    else:
+        raise ValueError(f"Unsupported 'outres' value of {outres}")
+
     return timestamps, np.array(bases)
 
 
@@ -324,7 +339,7 @@ def read_T2(
     if not full_epoch:
         epoch = header.epoch & ((1 << 17) - 1)
     epoch <<= 32
-    
+
     # Check if need to store floating point
     if outres is TSRES.NS1:
         timestamps = np.array(timestamps, dtype=np.float128)
