@@ -101,7 +101,11 @@ def read_a2(
     return t, p
 
 def _consolidate_events(t: list, p: list):
-    data = (np.array(t, dtype=np.float64) * TIMESTAMP_RESOLUTION).astype(np.uint64) << 10
+    # float128 is needed, since float64 only encodes 53-bits of precision,
+    # while the high resolution timestamp has 54-bits precision
+    # TODO(Justin, 2023-02-21):
+    #   Check behaviour of code when more than 64-bit precision floating point is supplied.
+    data = (np.array(t, dtype=np.float128) * TIMESTAMP_RESOLUTION).astype(np.uint64) << 10
     data += np.array(p).astype(np.uint64)
     return np.sort(data)
 
