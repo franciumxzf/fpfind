@@ -271,8 +271,8 @@ def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
 def read_T2(
         filename: str,
         full_epoch: bool = False,
-        inres: TSRES = TSRES.PS125,
-        outres: TSRES = TSRES.NS1,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
     ):
     """Returns timestamp and detector information from T2 files.
     
@@ -282,12 +282,7 @@ def read_T2(
     Raises:
         ValueError: Length and termination bits inconsistent with filespec.
     """
-    if inres is not TSRES.PS125:
-        raise ValueError(
-            "'inres' only accepts 'TSRES.PS125': "
-            "T2 epoch files have hardcoded resolution of 125ps."
-        )
-    if outres not in TSRES:
+    if resolution not in TSRES:
         raise ValueError(
             "Timestamp resolution must be one of enumeration TSRES"
         )
@@ -302,7 +297,11 @@ def read_T2(
     # Accumulators
     timestamps = []  # all timestamps, units of 125ps
     bases = []
-    timestamp = 0  # current timestamp, deltas stored in T2
+
+    # Add 17-bit epoch LSB as per regular timestamp spec,
+    # i.e. (17-bit epoch LSB)(32-bit timestamp) => 49-bits
+    epoch_lsb = header.epoch & ((1 << 17) - 1)
+    timestamp = np.uint64(epoch_lsb << 32)  # current timestamp, deltas stored in T2
     buffer = 0
     size = 0  # number of bits in buffer
     with open(filename, "rb") as f:
@@ -343,24 +342,37 @@ def read_T2(
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
     
-    # Add epoch if required
-    epoch = header.epoch
-    if not full_epoch:
-        epoch = header.epoch & ((1 << 17) - 1)
-    epoch <<= 32
-
+    # Add full epoch if required
+    epoch_msb = header.epoch >> 17
+    
+    # Right now in units of 125ps
     # Check if need to store floating point
-    if outres is TSRES.NS1:
+    if fractional:
+        # Convert to desired resolution
         timestamps = np.array(timestamps, dtype=np.float128)
-        timestamps += np.float128(epoch)
-        timestamps = timestamps / TSRES.PS125.value
+        timestamps = timestamps / (TSRES.PS125.value/resolution.value) 
+        epoch_msb = np.float128(epoch_msb << 49)
+        epoch_msb = epoch_msb / (TSRES.PS125.value/resolution.value)
 
-    elif outres is TSRES.PS125:
-        timestamps = np.array(timestamps, dtype=np.uint64)
-        timestamps += np.uint64(epoch)
-
+    # Python integer objects can be arbitrarily long
+    # for resolutions smaller than 125ps, i.e. larger value
+    elif resolution.value > TSRES.PS125.value:
+        bitdiff = round(np.log2(resolution.value/TSRES.PS125.value))
+        timestamps = np.array(timestamps, dtype=object)
+        timestamps = timestamps << bitdiff
+        epoch_msb = int(epoch_msb) << (49+bitdiff)
+    
+    # Everything of resolution 125 ps and larger can fit
+    # in 64-bit unsigned integer, i.e. PS125, NS1.
     else:
-        raise ValueError(f"Unsupported 'outres' value of {outres}")
+        bitdiff = round(np.log2(TSRES.PS125.value/resolution.value))
+        timestamps = np.array(timestamps, dtype=np.uint64)
+        timestamps = timestamps >> bitdiff
+        epoch_msb = np.uint64(epoch_msb) << (49-bitdiff)
+
+    # Add epoch
+    if full_epoch:
+        timestamps += epoch_msb
 
     return timestamps, np.array(bases)
     
