@@ -11,7 +11,8 @@ References:
 
 import datetime as dt
 import logging
-from struct import unpack
+import pathlib
+from struct import pack, unpack
 from typing import NamedTuple
 
 import numpy as np
@@ -198,7 +199,7 @@ def read_T1(
         epoch_msb = epoch_msb / (TSRES.PS4.value/resolution.value)
 
     # Python integer objects can be arbitrarily long
-    elif resolution in (TSRES.PS4,):
+    elif resolution in (TSRES.PS4,) and full_epoch:
         timestamps = np.array(timestamps, dtype=object)
         epoch_msb = int(epoch_msb) << 54
     
@@ -363,4 +364,36 @@ def read_T2(
         timestamps += epoch_msb
 
     return timestamps, np.array(bases)
+
+
+def write_T1(directory, full_epoch, timestamps, detectors):
+    # Fit epoch to within 32-bits LSB
+    full_epoch &= ((1<<32)-1)
+
+    directory = pathlib.Path(directory)
+    target = directory / f"{full_epoch:x}"
     
+    # Broadcast detectors if single value given
+    if np.array(detectors).ndim == 0:
+        detectors = np.ones(len(timestamps)) * detectors
+    elif len(detectors) != len(timestamps):
+        raise ValueError("Lengths of timestamps and detectors must match")
+    
+    with open(target, "wb") as f:
+        header = pack("iIIii", 0x101, full_epoch, len(timestamps), 49, 4)
+        f.write(header)
+
+        # Write events, 4ps resolution
+        # 17-bit LSB epoch fits into a timestamp event
+        timestamp_epoch = ((full_epoch & ((1<<17)-1)) << (32 + 5))
+        for timestamp, detector in zip(timestamps, detectors):
+            full_timestamp = timestamp_epoch + timestamp
+            event = (full_timestamp << 10) + int(detector)
+
+            # Write high word, then low word
+            f.write(pack("<II", event >> 32, event & 0xffff_ffff))
+        
+        # Termination
+        f.write(pack("II", 0, 0))
+
+    return target
