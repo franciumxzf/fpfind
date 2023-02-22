@@ -9,7 +9,6 @@ References:
     [2] Epoch header definitions: https://github.com/s-fifteen-instruments/QKDServer/blob/master/S15qkd/utils.py
 """
 
-import enum
 import datetime as dt
 import logging
 from struct import unpack
@@ -209,7 +208,7 @@ def read_T1(
         bitdiff = round(np.log2(TSRES.PS4.value/resolution.value))
         timestamps = np.array(timestamps, dtype=np.uint64)
         timestamps = timestamps >> bitdiff
-        epoch_msb = np.uint64(epoch_msb) << (54-bitdiff)
+        epoch_msb = np.uint64(epoch_msb) << np.uint64(54-bitdiff)
 
     # Add epoch
     if full_epoch:
@@ -357,7 +356,7 @@ def read_T2(
         bitdiff = round(np.log2(TSRES.PS125.value/resolution.value))
         timestamps = np.array(timestamps, dtype=np.uint64)
         timestamps = timestamps >> bitdiff
-        epoch_msb = np.uint64(epoch_msb) << (49-bitdiff)
+        epoch_msb = np.uint64(epoch_msb) << np.uint64(49-bitdiff)
 
     # Add epoch
     if full_epoch:

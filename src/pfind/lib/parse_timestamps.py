@@ -21,7 +21,6 @@ import argparse
 import struct
 import sys
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from pfind import TSRES
@@ -29,8 +28,8 @@ from pfind import TSRES
 def read_a0(
         filename: str,
         legacy: bool = None,
-        float: bool = True,
-        raw: bool = False,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
     ):
     """Converts a0 timestamp format into timestamps and detector pattern.
     
@@ -53,52 +52,46 @@ def read_a0(
     data = np.genfromtxt(filename, delimiter="\n", dtype="U8")
     data = np.array([int(v,16) for v in data]).reshape(-1, 2)
     t = ((np.uint64(data[:, 1]) << 22) + (data[:, 0] >> 10))
-    if float:
-        t = np.array(t, dtype=np.float128)
-        if not raw:
-            t = t / TSRES.PS4.value
-    elif not raw:
-        t = t // TSRES.PS4.value  # convert to units of ns
+    t = _format_timestamps(t, resolution, fractional)
     p = data[:, 0] & 0xF
     return t, p
 
 def read_a1(
         filename: str,
         legacy: bool = False,
-        float: bool = True,
-        raw: bool = False,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
     ):
     high_pos = 1; low_pos = 0
     if legacy: high_pos, low_pos = low_pos, high_pos
     with open(filename, "rb") as f:
         data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
     t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
-    if float:
-        t = np.array(t, dtype=np.float128)
-        if not raw:
-            t = t / TSRES.PS4.value
-    elif not raw:
-        t = t // TSRES.PS4.value  # convert to units of ns
+    t = _format_timestamps(t, resolution, fractional)
     p = data[:, low_pos] & 0xF
     return t, p
 
 def read_a2(
         filename: str,
         legacy: bool = None,
-        float: bool = True,
-        raw: bool = False,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
     ):
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
     data = np.array([int(v,16) for v in data])
     t = np.uint64(data >> 10)
-    if float:
-        t = np.array(t, dtype=np.float128)
-        if not raw:
-            t = t / TSRES.PS4.value
-    elif not raw:
-        t = t // TSRES.PS4.value  # convert to units of ns
+    t = _format_timestamps(t, resolution, fractional)
     p = data & 0xF
     return t, p
+
+def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
+    if fractional:
+        t = np.array(t, dtype=np.float128)
+        t = t / (TSRES.PS4.value/resolution.value)
+    else:
+        t = np.array(t, dtype=np.uint64)
+        t = t // (TSRES.PS4.value//resolution.value)
+    return t
 
 def _consolidate_events(t: list, p: list):
     # float128 is needed, since float64 only encodes 53-bits of precision,
