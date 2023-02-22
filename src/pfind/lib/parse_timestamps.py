@@ -24,7 +24,7 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 
-TIMESTAMP_RESOLUTION = 256  # units of 1/ns
+from pfind import TSRES
     
 def read_a0(
         filename: str,
@@ -56,9 +56,9 @@ def read_a0(
     if float:
         t = np.array(t, dtype=np.float128)
         if not raw:
-            t = t / TIMESTAMP_RESOLUTION
+            t = t / TSRES.PS4.value
     elif not raw:
-        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
+        t = t // TSRES.PS4.value  # convert to units of ns
     p = data[:, 0] & 0xF
     return t, p
 
@@ -76,9 +76,9 @@ def read_a1(
     if float:
         t = np.array(t, dtype=np.float128)
         if not raw:
-            t = t / TIMESTAMP_RESOLUTION
+            t = t / TSRES.PS4.value
     elif not raw:
-        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
+        t = t // TSRES.PS4.value  # convert to units of ns
     p = data[:, low_pos] & 0xF
     return t, p
 
@@ -94,9 +94,9 @@ def read_a2(
     if float:
         t = np.array(t, dtype=np.float128)
         if not raw:
-            t = t / TIMESTAMP_RESOLUTION
+            t = t / TSRES.PS4.value
     elif not raw:
-        t = t // TIMESTAMP_RESOLUTION  # convert to units of ns
+        t = t // TSRES.PS4.value  # convert to units of ns
     p = data & 0xF
     return t, p
 
@@ -105,7 +105,7 @@ def _consolidate_events(t: list, p: list):
     # while the high resolution timestamp has 54-bits precision
     # TODO(Justin, 2023-02-21):
     #   Check behaviour of code when more than 64-bit precision floating point is supplied.
-    data = (np.array(t, dtype=np.float128) * TIMESTAMP_RESOLUTION).astype(np.uint64) << 10
+    data = (np.array(t, dtype=np.float128) * TSRES.PS4.value).astype(np.uint64) << 10
     data += np.array(p).astype(np.uint64)
     return np.sort(data)
 

@@ -17,21 +17,10 @@ from typing import NamedTuple
 
 import numpy as np
 
+from pfind import TSRES
+
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
-
-TIMESTAMP_RESOLUTION = 256
-
-class TSRES(enum.Enum):
-    """Stores timestamp resolution information.
-    
-    Values assigned correspond to the number of units within a
-    span of 1 nanosecond.
-    """
-    NS1 = 1
-    PS125 = 8
-    PS4 = 256
-
 
 class HeadT1(NamedTuple):
     tag: int

@@ -100,7 +100,7 @@ if __name__ == "__main__":
                 # Parsing binary timestamps
                 ts, _ = ts_parser.read_a1(inputfile, args.x)
                 for t in ts:
-                    print(int(t * ts_parser.TIMESTAMP_RESOLUTION))
+                    print(int(t * ts_parser.TSRES.PS4.value))
             
             # Clean up
             finally:
