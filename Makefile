@@ -23,6 +23,8 @@ pfind-shell:
 # Package-related stuff
 test:
 	poetry run pytest
+test64:
+	poetry run pytest --float64
 clean:
 	find . -type d -name ".pytest_cache" | xargs rm -rf
 	find . -type d -name "__pycache__" | xargs rm -rf
