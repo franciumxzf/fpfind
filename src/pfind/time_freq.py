@@ -3,14 +3,15 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 import math
-import os
 from scipy.fft import fft, ifft
 import sys
+import pathlib
 
 from pfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
 UPPER_LIMIT = 5e-5 # whether to put as an option
 TIMESTAMP_RESOLUTION = 256
+EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
 Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
@@ -47,10 +48,9 @@ def find_max(arr):
     return time_diff, max_value, sigma
 
 def statistical_significance(arr):
-    arr_real = arr.real
-    ck = np.max(arr_real)
-    ck_average = arr_real.sum() / np.size(arr_real)
-    S = (ck - ck_average) / np.std(arr_real)
+    ck = np.max(arr)
+    ck_average = np.mean(arr)
+    S = (ck - ck_average) / np.std(arr)
     return S
 
 def process_timestamp(arr, start_time, delta_t):
@@ -230,11 +230,13 @@ def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs, sep):
     epoch_dir = pathlib.Path(dir_name)
     timestamp = np.array([], dtype=np.float64)
     for i in range(num_of_epochs):
+    timestamp = np.array([], dtype=np.float128)
+    for i in range(num_of_epochs + 1):
         epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
         
-    for i in range(num_of_epochs):
+    for i in range(num_of_epochs + 1):
         epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + sep * num_of_epochs + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
@@ -266,6 +268,8 @@ if __name__ == "__main__":
         bob = get_timestamp(args.D, 'T1', args.e, args.n, args.s)
 
         delta_tmax = args.r
+        Ta = num_of_epochs * EPOCH_LENGTH
+        Ts = args.s * Ta
         N = 2 ** args.q
         S_th = args.S
 
