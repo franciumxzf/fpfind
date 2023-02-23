@@ -33,19 +33,11 @@ def find_max(arr):
     arr_real = arr.real
     time_diff = 0
     max_value = arr_real[time_diff]
-    arr_sum = 0
-    power_sum = 0
-    for i in range(len(arr_real)):
-        arr_sum += arr_real[i]
-        power_sum += arr_real[i] ** 2
-        if arr_real[i] > max_value:
-            time_diff = i
-            max_value = arr_real[i]
+    time_diff = np.argmax(arr_real)
+    max_value = arr_real[time_diff]
     if time_diff > (len(arr_real) / 2):
         time_diff -= len(arr_real)
-    arr_mean = arr_sum / len(arr_real)
-    sigma = math.sqrt(power_sum / len(arr_real) - arr_mean ** 2)
-    return time_diff, max_value, sigma
+    return time_diff, max_value
 
 def statistical_significance(arr):
     ck = np.max(arr)
@@ -57,8 +49,8 @@ def process_timestamp(arr, start_time, delta_t):
     new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
     bin_arr = np.zeros(N, dtype = np.int32)
     #t/delta_t mod N
-    for i in range(np.size(new_arr)):
-        bin_arr[math.floor(new_arr[i] // delta_t) % N] = 1
+    result = np.int32((new_arr // delta_t) % N)
+    bin_arr[result] = 1
     return bin_arr
 
 def time_freq(arr_a, arr_b):
