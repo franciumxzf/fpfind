@@ -1,7 +1,6 @@
 import argparse
 import numpy as np
 import logging
-import matplotlib.pyplot as plt
 import math
 from scipy.fft import fft, ifft
 import sys
@@ -17,14 +16,6 @@ Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
 delta_tmax = 2 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
-
-def read_a1(filename: str, legacy: bool = False):
-    high_pos = 1; low_pos = 0
-    if legacy: high_pos, low_pos = low_pos, high_pos
-    with open(filename, "rb") as f:
-        data = np.fromfile(file=f, dtype="=I").reshape(-1, 2)
-    t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10)) / TIMESTAMP_RESOLUTION
-    return t
 
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
@@ -209,19 +200,25 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
         return pfind(alice, backup_bob)
-    # print(f"{int(time_result):d}\t{int(freq_result * 1e12):d}\n")
-    print(f"{int(time_result):d}\t{int(-freq_result / (1 + freq_result) * 2e34):d}\n")
+    
+    logging.debug(f"time result: {time_result}, frequency result: {freq_result}")
+    # print(f"{int(time_result):d}\t{int((1 / (1 + freq_result) - 1) * 2e34):d}\n")
     return time_result, freq_result
 
-# time result: units of 1ns
-# frequency result: units of 1e-12
+def result_for_freqcd(alice, bob):
+    alice_copy = alice.copy()
+    bob_copy = bob.copy()
 
-import pathlib
+    alice_freq = pfind(bob, alice)[1]
+    bob_time = pfind(alice_copy, bob_copy)[0]
+
+    print(f"{int(bob_time):d}\t{int(alice_freq * 2e34):d}\n")       
+
+    # time result: units of 1ns
+    # frequency result: units of 2e34
 
 def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs, sep):
     epoch_dir = pathlib.Path(dir_name)
-    timestamp = np.array([], dtype=np.float64)
-    for i in range(num_of_epochs):
     timestamp = np.array([], dtype=np.float128)
     for i in range(num_of_epochs + 1):
         epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + i)
@@ -246,7 +243,6 @@ if __name__ == "__main__":
     parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
     parser.add_argument("-S", type = float, default = 6, help = "statistical significance threshold")
 
-
     if len(sys.argv) > 1:
         args = parser.parse_args()
 
@@ -265,4 +261,4 @@ if __name__ == "__main__":
         N = 2 ** args.q
         S_th = args.S
 
-        pfind(alice, bob)
+        result_for_freqcd(alice, bob)
