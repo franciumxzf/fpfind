@@ -62,6 +62,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>   // open, O_RDONLY, O_NONBLOCK
+#include <sys/select.h> // fd_set, usually implicitly declared
 #include <unistd.h>  // getopt, select
 #include <errno.h>   // select errno
 
