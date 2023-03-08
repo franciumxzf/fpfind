@@ -14,7 +14,7 @@ EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
 Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
-delta_tmax = 2 # the maximum acceptable delta_t to start tracking/ timing resolution
+delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
 
 def cross_corr(arr1, arr2):
@@ -217,16 +217,16 @@ def result_for_freqcd(alice, bob):
     # time result: units of 1ns
     # frequency result: units of 2e34
 
-def get_timestamp(dir_name, file_type, first_epoch, num_of_epochs, sep):
+def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, sep):
     epoch_dir = pathlib.Path(dir_name)
     timestamp = np.array([], dtype=np.float128)
     for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + i)
+        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
         
     for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + sep * num_of_epochs + i)
+        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + sep * num_of_epochs + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
     return timestamp
@@ -242,18 +242,20 @@ if __name__ == "__main__":
     parser.add_argument("-q", type = int, default = 20,  help = "FFT buffer order, N = 2**q")
     parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
     parser.add_argument("-S", type = float, default = 6, help = "statistical significance threshold")
+    parser.add_argument("--skip", type = int, default = 0, help = "number of skip epochs")
 
     if len(sys.argv) > 1:
         args = parser.parse_args()
 
         first_epoch = args.e
+        skip_epoch = args.skip
         num_of_epochs = args.n
 
         # alice: low count side - chopper - HeadT2 - sendfiles
         # bob: high count side - chopper2 - HeadT1 - t1files
 
-        alice = get_timestamp(args.d, 'T2', args.e, args.n, args.s)
-        bob = get_timestamp(args.D, 'T1', args.e, args.n, args.s)
+        alice = get_timestamp(args.d, 'T2', first_epoch, skip_epoch, num_of_epochs, args.s)
+        bob = get_timestamp(args.D, 'T1', first_epoch, skip_epoch, num_of_epochs, args.s)
 
         delta_tmax = args.r
         Ta = num_of_epochs * EPOCH_LENGTH
