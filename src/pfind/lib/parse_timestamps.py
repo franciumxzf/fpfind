@@ -25,6 +25,14 @@ import sys
 import numpy as np
 
 from pfind import TSRES
+
+# Compilations of numpy that do not include support for 128-bit floats will not
+# expose 'np.float128'. We map such instances directly into a 64-bit float instead.
+# Note that some variants implicitly map 'np.float128' to 'np.float64' as well.
+np_float = np.float64
+if hasattr(np, "float128"):
+    np_float = np.float128
+
     
 def read_a0(
         filename: str,
@@ -87,7 +95,7 @@ def read_a2(
 
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
     if fractional:
-        t = np.array(t, dtype=np.float128)
+        t = np.array(t, dtype=np_float)
         t = t / (TSRES.PS4.value/resolution.value)
     else:
         t = np.array(t, dtype=np.uint64)
@@ -97,9 +105,7 @@ def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
 def _consolidate_events(t: list, p: list):
     # float128 is needed, since float64 only encodes 53-bits of precision,
     # while the high resolution timestamp has 54-bits precision
-    # TODO(Justin, 2023-02-21):
-    #   Check behaviour of code when more than 64-bit precision floating point is supplied.
-    data = (np.array(t, dtype=np.float128) * TSRES.PS4.value).astype(np.uint64) << 10
+    data = (np.array(t, dtype=np_float) * TSRES.PS4.value).astype(np.uint64) << 10
     data += np.array(p).astype(np.uint64)
     return np.sort(data)
 
