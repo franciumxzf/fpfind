@@ -22,6 +22,8 @@ import pathlib
 import warnings
 import struct
 import sys
+from typing import Tuple
+from collections.abc import Iterator
 
 import numpy as np
 import tqdm
@@ -220,11 +222,18 @@ def print_statistics(filename: str, t: list, p: list):
         print(f"Event rate (/s): {int(len(t)//duration)}")
         print(f"Detection patterns: {sorted(np.unique(p))}")
 
-def print_statistics_stream(filename: str, stream, block_size: int = 100_000):
+def print_statistics_stream(
+        filename: str,
+        stream: Iterator[Tuple],
+        block_size: int = 100_000,
+        display: bool = True,
+    ):
     """Prints statistics using timestamp event streamers.
     
     'block_size' is defined as number of events per block streamed, which
     corresponds to 1/8th the size of the read buffer used in the streamer.
+
+    Set 'display' to False to disable progress bar.
     """
     # Calculate statistics
     size = pathlib.Path(filename).stat().st_size
@@ -238,7 +247,9 @@ def print_statistics_stream(filename: str, stream, block_size: int = 100_000):
 
     # Processs batches of events
     count = np.count_nonzero
-    for t, p in tqdm.tqdm(stream, total=num_batches):
+    if display:
+        stream = tqdm.tqdm(stream, total=num_batches)
+    for t, p in stream:
         count_p1 += count(p & 0b0001 != 0)
         count_p2 += count(p & 0b0010 != 0)
         count_p3 += count(p & 0b0100 != 0)
@@ -275,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
     parser.add_argument("-X", action="store_true", help="Input legacy format")
     parser.add_argument("-p", action="store_true", help="Print statistics")
+    parser.add_argument("-q", action="store_true", help="Suppress progress indicators")
     parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format")
     parser.add_argument("-x", action="store_true", help="Output legacy format")
     parser.add_argument("infile", help="Input timestamp file")
@@ -301,7 +313,7 @@ if __name__ == "__main__":
         # Check if printing stream first
         if args.p and stream is not None:
             streamer = stream(filepath, args.X)
-            print_statistics_stream(filepath, streamer)
+            print_statistics_stream(filepath, streamer, display=(not args.q))
 
         else:
             t, p = read(filepath, args.X)
