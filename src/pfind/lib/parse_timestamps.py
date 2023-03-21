@@ -19,6 +19,7 @@
 
 import argparse
 import pathlib
+import warnings
 import struct
 import sys
 
@@ -32,6 +33,9 @@ from pfind import TSRES
 np_float = np.float64
 if hasattr(np, "float128"):
     np_float = np.float128
+    warnings.warn(
+        "128-bit floats unsupported in current numpy version, using 64-bit instead."
+    )
 
     
 def read_a0(
@@ -41,13 +45,15 @@ def read_a0(
         fractional: bool = True,
     ):
     """Converts a0 timestamp format into timestamps and detector pattern.
-    
-    If 'float' is True, then the output is returned as a 128-bit floating
-    point value in fractional units of 1 ns. Otherwise, 'float' is False
-    will return 64-bit integer values in multiples of 1 ns (the fractional
-    component is discarded).
 
-    If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns.
+    'legacy' is set at the point of 'readevents' invocation, and determines
+    the timestamp storage format.
+
+    'resolution' can be set to any of the available TSRES enumeration, and
+    denotes the units of the output timestamps. 'fractional' determines
+    whether sub-unit precisions should be preserved as well. The combination
+    of 'resolution' and 'fractional' will determine the resulting output
+    format of the timestamps.
 
     Note:
         128-bit floating point is required since 64-bit float only has a
@@ -55,8 +61,8 @@ def read_a0(
         the bandwidth cost is too high when using 128-bit floats, then
         chances are the application also does not require sub-ns precision.
 
-        Consider adding an option to return the raw timestamps in units
-        of 4ps directly, so no accuracy loss is expected.
+        There is no legacy formatting for event types a0 and a2. Preserved in
+        the function signature to maintain parity with 'read_a1'.
     """
     data = np.genfromtxt(filename, delimiter="\n", dtype="U8")
     data = np.array([int(v,16) for v in data]).reshape(-1, 2)
@@ -71,6 +77,7 @@ def read_a1(
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
     ):
+    """See documentation for 'read_a0'"""
     high_pos = 1; low_pos = 0
     if legacy: high_pos, low_pos = low_pos, high_pos
     with open(filename, "rb") as f:
@@ -86,6 +93,7 @@ def read_a2(
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
     ):
+    """See documentation for 'read_a0'"""
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
     data = np.array([int(v,16) for v in data])
     t = np.uint64(data >> 10)
