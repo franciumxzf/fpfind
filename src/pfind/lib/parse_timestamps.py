@@ -145,7 +145,44 @@ def print_statistics(filename: str, t: list, p: list):
         print(f"Total duration (s): {duration:0.9f}")
         print(f"Event rate (/s): {int(len(t)//duration)}")
         print(f"Detection patterns: {sorted(np.unique(p))}")
+    
+def stream_a1(
+        filename: str,
+        legacy: bool,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
+    ):
+    """Streaming variant of 'read_a1'.
 
+    For large timestamp datasets where either not all timestamps need
+    to be loaded into memory, or only statistics need to be retrieved.
+    This avoids an OOM kill.
+
+    Where efficiency is desired and number of timestamps is small,
+    'read_a1' should be preferred instead.
+    
+    Usage:
+        >>> for t, p in stream_a1(...):
+        ...     print(t, p)
+    """
+    # Stream statistics
+    with open(filename, "rb") as f:
+        while True:
+            low_word = f.read(4)
+            high_word = f.read(4)
+            if len(high_word) == 0:
+                break
+            
+            # Swap words for legacy format
+            if legacy:
+                low_word, high_word = high_word, low_word
+            low_word = struct.unpack("=I", low_word)[0]
+            high_word = struct.unpack("=I", high_word)[0]
+
+            t = (high_word << 22) + (low_word >> 10)
+            t = _format_timestamps(t, resolution, fractional)
+            p = low_word & 0xF
+            yield t, p
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
