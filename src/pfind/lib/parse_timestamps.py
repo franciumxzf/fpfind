@@ -102,6 +102,57 @@ def read_a2(
     t = _format_timestamps(t, resolution, fractional)
     p = data & 0xF
     return t, p
+    
+def stream_a1(
+        filename: str,
+        legacy: bool,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
+        buffer_size: int = 800_000,
+        disable_formatter: bool = False,
+    ):
+    """Block streaming variant of 'read_a1'.
+
+    For large timestamp datasets where either not all timestamps need
+    to be loaded into memory, or only statistics need to be retrieved.
+    'buffer_size' in bytes, other arguments to follow as documented in
+    'read_a0'.
+
+    If timestamp formatting is not required, formatter can be disabled
+    using 'disable_formatter' to achieved 50% speed up.
+
+    Note:
+        Performance of naive streaming is poor (roughly 2 orders magnitude
+        slower), and deprecated thusly. A compromise, whereby blocks are
+        streamed instead, yields minimal performance loss while avoiding
+        issues with memory (to avoid an OOM kill).
+
+        A buffer size between 100kB and 1MB is optimal. Disk read latencies
+        dominate at low buffer sizes, while memory allocation latencies
+        dominate at high buffer sizes.
+
+        Where efficiency is desired and number of timestamps is small,
+        'read_a1' should be preferred instead.
+
+    Usage:
+        >>> for t, p in stream_a1(...):
+        ...     print(t, p)
+    """
+    high_pos = 1; low_pos = 0
+    if legacy: high_pos, low_pos = low_pos, high_pos
+    # Stream statistics
+    with open(filename, "rb") as f:
+        while True:
+            buffer = f.read(buffer_size)
+            if len(buffer) == 0:
+                break
+
+            data = np.frombuffer(buffer, dtype="=I").reshape(-1, 2)
+            t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
+            if not disable_formatter:
+                t = _format_timestamps(t, resolution, fractional)
+            p = data[:, low_pos] & 0xF
+            yield t, p
 
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
     if fractional:
@@ -142,6 +193,13 @@ def write_a1(filename: str, t: list, p: list, legacy: bool = False):
             f.write(struct.pack("=Q", line))
 
 def print_statistics(filename: str, t: list, p: list):
+    """Prints statistics using timestamp event readers.
+    
+    Note:
+        Maintained only for legacy reasons, to support a0 and a2
+        timestamp event files, since 'stream_a0' and 'stream_a2'
+        not yet implemented.
+    """
     print(f"Name: {str(filename)}")
     if pathlib.Path(filename).is_file():
         print(f"Filesize (MB): {pathlib.Path(filename).stat().st_size/(1 << 20):.3f}")
@@ -162,36 +220,35 @@ def print_statistics(filename: str, t: list, p: list):
         print(f"Event rate (/s): {int(len(t)//duration)}")
         print(f"Detection patterns: {sorted(np.unique(p))}")
 
-def print_statistics_stream(filename: str, stream):
+def print_statistics_stream(filename: str, stream, block_size: int = 100_000):
+    """Prints statistics using timestamp event streamers.
+    
+    'block_size' is defined as number of events per block streamed, which
+    corresponds to 1/8th the size of the read buffer used in the streamer.
+    """
     # Calculate statistics
     size = pathlib.Path(filename).stat().st_size
-    num_events = size // 8  # one event is 64-bits / 8-bytes
+    num_events = int(size // 8)
+    # Calculate number of batches, accounting for off-by-one error
+    num_batches = int(((size-1) // block_size // 8) + 1) # one event is 64-bits / 8-bytes
     first_t = None; last_t = None
     count_p1 = 0; count_p2 = 0; count_p3 = 0; count_p4 = 0
     count_mp = 0; count_np = 0
     set_p = set()
 
-    # First event optimization
-    first_t, p = next(stream)
-    if True:
-        count_p1 += int(p & 0b0001 != 0)
-        count_p2 += int(p & 0b0010 != 0)
-        count_p3 += int(p & 0b0100 != 0)
-        count_p4 += int(p & 0b1000 != 0)
-        count_mp += int(p not in (0, 1, 2, 4, 8))
-        count_np += int(p == 0)
-        set_p.add(p)
-
-    # Process rest of events
-    for t, p in tqdm.tqdm(stream, total=num_events-1):
-        count_p1 += int(p & 0b0001 != 0)
-        count_p2 += int(p & 0b0010 != 0)
-        count_p3 += int(p & 0b0100 != 0)
-        count_p4 += int(p & 0b1000 != 0)
-        count_mp += int(p not in (0, 1, 2, 4, 8))
-        count_np += int(p == 0)
-        set_p.add(p)
-    last_t = t
+    # Processs batches of events
+    count = np.count_nonzero
+    for t, p in tqdm.tqdm(stream, total=num_batches):
+        count_p1 += count(p & 0b0001 != 0)
+        count_p2 += count(p & 0b0010 != 0)
+        count_p3 += count(p & 0b0100 != 0)
+        count_p4 += count(p & 0b1000 != 0)
+        count_mp += count(np.isin(p, (0, 1, 2, 4, 8), invert=True))
+        count_np += count(p == 0)
+        set_p.update(np.unique(p))
+        if first_t is None:
+            first_t = t[0]
+    last_t = t[-1]
 
     # Per usual
     print(f"Name: {str(filename)}")
@@ -212,47 +269,6 @@ def print_statistics_stream(filename: str, stream):
         print(f"Total duration (s): {duration:0.9f}")
         print(f"Event rate (/s): {int(num_events//duration)}")
         print(f"Detection patterns: {sorted(set_p)}")
-    
-def stream_a1(
-        filename: str,
-        legacy: bool,
-        resolution: TSRES = TSRES.NS1,
-        fractional: bool = True,
-        disable_formatter: bool = False,
-    ):
-    """Streaming variant of 'read_a1'.
-
-    For large timestamp datasets where either not all timestamps need
-    to be loaded into memory, or only statistics need to be retrieved.
-    This avoids an OOM kill.
-
-    Where efficiency is desired and number of timestamps is small,
-    'read_a1' should be preferred instead. If exact timestamp parsing
-    is not needed, set 'disable_formatter' to True (roughly 2.5x speedup).
-
-    Usage:
-        >>> for t, p in stream_a1(...):
-        ...     print(t, p)
-    """
-    # Stream statistics
-    with open(filename, "rb") as f:
-        while True:
-            low_word = f.read(4)
-            high_word = f.read(4)
-            if len(high_word) == 0:
-                break
-
-            # Swap words for legacy format
-            if legacy:
-                low_word, high_word = high_word, low_word
-            low_word = struct.unpack("=I", low_word)[0]
-            high_word = struct.unpack("=I", high_word)[0]
-
-            t = (high_word << 22) + (low_word >> 10)
-            if not disable_formatter:
-                t = _format_timestamps(t, resolution, fractional)
-            p = low_word & 0xF
-            yield t, p
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
@@ -281,11 +297,10 @@ if __name__ == "__main__":
         filepath = pathlib.Path(args.infile)
         if not filepath.is_file():
             raise ValueError(f"'{args.infile}' is not a file.")
-        is_large_file = filepath.stat().st_size > 1e6  # 1 GB
-
+        
         # Check if printing stream first
-        if args.p and is_large_file:
-            streamer = stream(filepath, args.X, disable_formatter=True)
+        if args.p and stream is not None:
+            streamer = stream(filepath, args.X)
             print_statistics_stream(filepath, streamer)
 
         else:
