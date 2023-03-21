@@ -18,6 +18,7 @@
 #   2022-10-07 Currently does not deal with dummy events and blinding events, all set to 0
 
 import argparse
+import pathlib
 import struct
 import sys
 
@@ -124,22 +125,52 @@ def write_a1(filename: str, t: list, p: list, legacy: bool = False):
                 line = int(line); line = ((line & 0xFFFFFFFF) << 32) + (line >> 32)
             f.write(struct.pack("=Q", line))
 
+def print_statistics(filename: str, t: list, p: list):
+    print(f"Name: {str(filename)}")
+    if pathlib.Path(filename).is_file():
+        print(f"Filesize (MB): {pathlib.Path(filename).stat().st_size/(1 << 20):.3f}")
+    width = 0
+    if len(t) != 0:
+        width = int(np.floor(np.log10(len(t)))) + 1
+    print(    f"Total events    : {len(t):>{width}d}")
+    if len(t) != 0:
+        count = np.count_nonzero
+        print(f"  Channel 1     : {count(p & 0b0001 != 0):>{width}d}")
+        print(f"  Channel 2     : {count(p & 0b0010 != 0):>{width}d}")
+        print(f"  Channel 3     : {count(p & 0b0100 != 0):>{width}d}")
+        print(f"  Channel 4     : {count(p & 0b1000 != 0):>{width}d}")
+        print(f"  Multi-channel : {count(np.isin(p, (0, 1, 2, 4, 8), invert=True)):>{width}d}")
+        print(f"  No channel    : {count(p == 0):>{width}d}")
+        duration = (t[-1]-t[0])*1e-9
+        print(f"Total duration (s): {duration:0.9f}")
+        print(f"Event rate (/s): {int(len(t)//duration)}")
+        print(f"Detection patterns: {sorted(np.unique(p))}")
+
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
     parser.add_argument("-X", action="store_true", help="Input legacy format")
-    parser.add_argument("-a", choices=["0","1","2"], required=True, help="Output timestamp format")
+    parser.add_argument("-p", action="store_true", help="Print statistics")
+    parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format")
     parser.add_argument("-x", action="store_true", help="Output legacy format")
     parser.add_argument("infile", help="Input timestamp file")
-    parser.add_argument("outfile", help="Output timestamp file")
+    parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
 
     # Do script only if arguments supplied
     # otherwise run as a normal script (for interactive mode)
     if len(sys.argv) > 1:
         args = parser.parse_args()
 
+        # Check outfile supplied if '-p' not supplied
+        if not args.p and not args.outfile:
+            raise ValueError("destination filepath must be supplied.")
+
         read = [read_a0, read_a1, read_a2][int(args.A)]
         write = [write_a0, write_a1, write_a2][int(args.a)]
 
         t, p = read(args.infile, args.X)
-        write(args.outfile, t, p, args.x)
+        if args.p:
+            print_statistics(args.infile, t, p)
+        else:
+            write(args.outfile, t, p, args.x)
