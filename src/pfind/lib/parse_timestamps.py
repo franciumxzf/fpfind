@@ -123,6 +123,15 @@ def stream_a1(
     If timestamp formatting is not required, formatter can be disabled
     using 'disable_formatter' to achieved 50% speed up.
 
+    Note that these streamer can easily be extended to perform some
+    pre-processing cleanup, see Usage.
+
+    Usage:
+        # Application note: Block preprocessing
+        >>> for t, p in stream_a1(...):
+        ...     t, p = preprocess(t, p)
+        ...     yield t, p
+
     Note:
         Performance of naive streaming is poor (roughly 2 orders magnitude
         slower), and deprecated thusly. A compromise, whereby blocks are
