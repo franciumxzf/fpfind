@@ -4,7 +4,7 @@ data
 data_win
 
 # Compiled C files
-src/pfind/freqcd
+src/fpfind/freqcd
 
 # Compiled python files
 **/__pycache__

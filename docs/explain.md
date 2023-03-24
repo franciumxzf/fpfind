@@ -20,7 +20,7 @@
 
 The above algorithm is able to calculate the correct frequency offset value (upper limit for a single pass is about $\pm 5e-5$). In order to calculate the correct time offset value, another pass with corrected bob is needed.
 
-`pfind` :
+`fpfind` :
 
 Now, we want to improve the upper limit of the above algorithm. We proposed the following steps:
 1. calculate freq offset, apply and see if the next offset calculated drops below 5e-7 (tbc? need to add another condition that smaller than the previous value); if it cannot find the peak, directly goes into step 2
@@ -72,7 +72,7 @@ Several new timestamp data were collected with various frequency detune to test 
 Some things we learnt from new data:
 - Upper bound to algorithm with the current parameters is at least 1.5e-4, but only limited to strong peak.
 - Pair statistics does strongly influence whether peak can be easily found or not. Fails to converge for 1e-4 (later found, around 5e-5) when peak signal is poor.
-- Relative timestamp drift is only on the order of 2e-5, which is pfind can easily find even with poor peak.
+- Relative timestamp drift is only on the order of 2e-5, which is fpfind can easily find even with poor peak.
 
 Now, if we know the upper limit of our algorithm (say 5e-5), we can manually apply the upper limit to bob, and let it run through the algorithm again. Ideally, the frequency result will be less than the upper limit, then run the algorithm again until it gives us 0 frequency result, and we can manually calculate the total frequency shift; or if we still get a non-sense number, we can increase the correction to 2 * upper limit and so on. With the final frequency offset value, we can find the time offset.
 
@@ -81,23 +81,23 @@ This method generally works. The only problem is that our condition to tell whet
 For now, we aim to fully resolve the freq offset for all the datasets (provided the data is sane), fix the time delay calculation. In the meantime, we will also work on the C code.
 
 ## Update until Dec 29th
-In the past two weeks, we improved the `pfind` function as described in `explain.md`. This method can do manual detune for both sides concurrently. Dataset 9 - 27 have been tested and results are acceptable. Next step is to test the algorithm on all other datasets that we have and use `generate_freqdetuneg2.py` to design the test cases around this method.
+In the past two weeks, we improved the `fpfind` function as described in `explain.md`. This method can do manual detune for both sides concurrently. Dataset 9 - 27 have been tested and results are acceptable. Next step is to test the algorithm on all other datasets that we have and use `generate_freqdetuneg2.py` to design the test cases around this method.
 
 ## Update until Jan 5th
 The algorithm was tested with all datasets. A conservative upper limit for `time_freq` function is set to be 5e-5. The generalized result can be found in `dataset_result.md`.
 
 
-1. output from pfind.py
+1. output from fpfind.py
 
 import sys
 print(..., file=sys.stderr)
 
-2. defining the input to pfind as a command line arguments
+2. defining the input to fpfind as a command line arguments
 
 argparse library
 
-- import pfind (use s15 code)
-- os.system: from pfind.c call pfind.py
+- import fpfind (use s15 code)
+- os.system: from fpfind.c call fpfind.py
 
 3. use the arguments instead of the timestamp file
 

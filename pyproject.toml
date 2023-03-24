@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "pfind"
+name = "fpfind"
 version = "0.1.0"
 description = ""
 authors = ["Xu Zifang <francium0415@gmail.com>", "Justin Peh <pehyuxiang@gmail.com>"]

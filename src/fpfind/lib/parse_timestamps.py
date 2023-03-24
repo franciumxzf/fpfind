@@ -28,7 +28,7 @@ from collections.abc import Iterator
 import numpy as np
 import tqdm
 
-from pfind import TSRES
+from fpfind import TSRES
 
 # Compilations of numpy that do not include support for 128-bit floats will not
 # expose 'np.float128'. We map such instances directly into a 64-bit float instead.

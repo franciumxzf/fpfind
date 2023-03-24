@@ -20,7 +20,7 @@
    --
 
    Program that receives a frequency offset between two parties calculated
-   by pfind, and performs a software correction of the timestamps emitted
+   by fpfind, and performs a software correction of the timestamps emitted
    by readevents. Parameters are optimized such that the correction can
    be performed using purely 64-bit constructs.
    

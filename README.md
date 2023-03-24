@@ -1,4 +1,4 @@
-# pfind
+# fpfind
 
 ## Quick start
 
@@ -27,18 +27,18 @@ The commands install the `poetry` build system in the local Python installation,
 
 ### Developing with Poetry
 
-As the `pfind` library is installed in editable mode, some notes when developing:
+As the `fpfind` library is installed in editable mode, some notes when developing:
 
-1. Internal importing should import from the `pfind` library, as per usual package development workflows.
+1. Internal importing should import from the `fpfind` library, as per usual package development workflows.
 1. Testing of the library should primarily be done via a testing framework, i.e. [test-driven development](https://en.wikipedia.org/wiki/Test-driven_development).
-   * Alternatively, activate the virtual environment to import `pfind` for running locally, i.e. `poetry shell; python; import pfind;`
-   * In a one-liner: `poetry run python -ic "import pfind"` 
+   * Alternatively, activate the virtual environment to import `fpfind` for running locally, i.e. `poetry shell; python; import fpfind;`
+   * In a one-liner: `poetry run python -ic "import fpfind"` 
 
 Since the `poetry` package installed in this manner will tie it to the local Python installation, the `poetry.lock` should not be committed to the repository. Once onboarding instructions are changed to [system-wide installation](https://python-poetry.org/docs/), dependency locking should be enabled by removing `poetry.lock` from the `.gitignore` file.
 
 ### Local installation
 
-If a local installation of `pfind` is desired, use the following command:
+If a local installation of `fpfind` is desired, use the following command:
 
 ```
 pip install -e .

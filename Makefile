@@ -1,4 +1,4 @@
-PACKAGE=pfind
+PACKAGE=fpfind
 DIR=src/${PACKAGE}
 LIB=${DIR}/lib
 
@@ -17,8 +17,8 @@ all:
 	gcc -o ${DIR}/freqcd ${DIR}/freqcd.c ${LIB}/getopt.c
 shell:
 	-poetry shell
-pfind-shell:
-	-poetry run python -ic "import pfind"
+fpfind-shell:
+	-poetry run python -ic "import fpfind"
 
 # Package-related stuff
 test:

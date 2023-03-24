@@ -6,7 +6,7 @@ from scipy.fft import fft, ifft
 import sys
 import pathlib
 
-from pfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
+from fpfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
 UPPER_LIMIT = 5e-5 # whether to put as an option
 TIMESTAMP_RESOLUTION = 256
@@ -122,7 +122,7 @@ def time_freq(arr_a, arr_b):
     logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
     return delta_T1, delta_u
 
-def pfind(alice, bob): # perform plus and minus step size concurrently
+def fpfind(alice, bob): # perform plus and minus step size concurrently
     backup_bob = bob.copy()
     freq_result = 0
     plus_freq_result = 0
@@ -199,7 +199,7 @@ def pfind(alice, bob): # perform plus and minus step size concurrently
     else: # maybe need to redesign here
         backup_bob /= (1 + UPPER_LIMIT)
         freq_result = UPPER_LIMIT
-        return pfind(alice, backup_bob)
+        return fpfind(alice, backup_bob)
     
     logging.debug(f"time result: {time_result}, frequency result: {freq_result}")
     # print(f"{int(time_result):d}\t{int((1 / (1 + freq_result) - 1) * 2e34):d}\n")
@@ -209,8 +209,8 @@ def result_for_freqcd(alice, bob):
     alice_copy = alice.copy()
     bob_copy = bob.copy()
 
-    alice_freq = pfind(bob, alice)[1]
-    bob_time = pfind(alice_copy, bob_copy)[0]
+    alice_freq = fpfind(bob, alice)[1]
+    bob_time = fpfind(alice_copy, bob_copy)[0]
 
     print(f"{int(bob_time):d}\t{int(alice_freq * 2e34):d}\n")       
 

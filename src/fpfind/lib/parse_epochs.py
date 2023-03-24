@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from pfind import TSRES
+from fpfind import TSRES
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
