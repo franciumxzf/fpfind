@@ -11,6 +11,7 @@ python = ">=3.8,<3.12"
 numpy = "^1.24.1"
 matplotlib = "^3.6.3"
 scipy = "^1.10.0"
+tqdm = "^4.65.0"
 
 
 [tool.poetry.group.dev.dependencies]
