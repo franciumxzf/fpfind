@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import numpy as np
 import logging
@@ -212,7 +213,7 @@ def result_for_freqcd(alice, bob):
     alice_freq = fpfind(bob, alice)[1]
     bob_time = fpfind(alice_copy, bob_copy)[0]
 
-    print(f"{int(bob_time):d}\t{int(alice_freq * 2e34):d}\n")       
+    print(f"{int(bob_time):d}\t{int(alice_freq * (1 << 34)):d}\n")
 
     # time result: units of 1ns
     # frequency result: units of 2e34
@@ -263,4 +264,5 @@ if __name__ == "__main__":
         N = 2 ** args.q
         S_th = args.S
 
-        result_for_freqcd(alice, bob)
+        td, fd = pfind(bob, alice)
+        print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
