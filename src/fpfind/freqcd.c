@@ -76,7 +76,7 @@
 #define FCORR_ARESBITS -34         /* absolute resolution of correction, in power of 2 */
 #define FCORR_AMAXBITS -13         /* absolute maximum allowed correction, in power of 2 */
 #define FCORR_DEFAULT 0            /* frequency correction in units of 2^FCORR_ARESBITS */
-#define __DEBUG__                  /* global debug flag, uncomment to disable */
+//#define __DEBUG__                /* global debug flag, uncomment to disable */
 
 // struct defined in non-legacy format
 typedef struct rawevent {
