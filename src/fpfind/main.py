@@ -264,5 +264,5 @@ if __name__ == "__main__":
         N = 2 ** args.q
         S_th = args.S
 
-        td, fd = pfind(bob, alice)
+        td, fd = fpfind(bob, alice)
         print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
