@@ -128,9 +128,9 @@ def stream_a1(
 
     Usage:
         # Application note: Block preprocessing
-        >>> for t, p in stream_a1(...):
-        ...     t, p = preprocess(t, p)
-        ...     yield t, p
+        #>>> for t, p in stream_a1(...):
+        #...     t, p = preprocess(t, p)
+        #...     yield t, p
 
     Note:
         Performance of naive streaming is poor (roughly 2 orders magnitude
@@ -146,8 +146,8 @@ def stream_a1(
         'read_a1' should be preferred instead.
 
     Usage:
-        >>> for t, p in stream_a1(...):
-        ...     print(t, p)
+        #>>> for t, p in stream_a1(...):
+        #...     print(t, p)
     """
     high_pos = 1; low_pos = 0
     if legacy: high_pos, low_pos = low_pos, high_pos
@@ -289,6 +289,83 @@ def print_statistics_stream(
         print(f"Total duration (s): {duration:0.9f}")
         print(f"Event rate (/s): {int(num_events//duration)}")
         print(f"Detection patterns: {sorted(set_p)}")
+
+def get_pattern_mask(
+        p: list,
+        pattern: int,
+        mask: bool = False,
+        invert: bool = False,
+    ) -> Tuple[list, list]:
+    """Returns a mask with bits set where patterns match, as well as result.
+    
+    The function behaves differently when the pattern is either used as
+    a fixed pattern (when 'mask' is False), or as a bitmask (when 'mask'
+    is True).
+    
+    When 'mask' is False, pattern matching with select events whose detector
+    patterns match the exact pattern. Inverting with 'invert' as False will
+    remove these events instead (i.e. pattern blacklist).
+
+    When 'mask' is True, only events containing any bits in the pattern will
+    be selected. Inverting with 'invert' as True will remove detector bits
+    corresponding to any of said bits.
+
+    Args:
+        p: List of detector patterns.
+        pattern: Pattern to match.
+        mask: Whether pattern should be used as a bitmask.
+        invert: Whether selection rules should be inverted. See documentation.
+
+    Examples:
+
+        >>> p = np.array([0,1,2,3,4,5,6,7,8]); t = np.array(p)
+
+        >>> mask1, p1 = get_pattern_mask(p, 0b0101, False, False)
+        >>> list(t[mask1]) == list(p1) and list(p1) == [5]
+        True
+
+        >>> mask2, p2 = get_pattern_mask(p, 0b0101, False, True)
+        >>> list(t[mask2]) == list(p2) and list(p2) == [0,1,2,3,4,6,7,8]
+        True
+
+        >>> mask3, p3 = get_pattern_mask(p, 0b0101, True, False)
+        >>> list(t[mask3]) == [1,3,4,5,6,7] and list(p3) == [1,1,4,5,4,5]
+        True
+
+        >>> mask4, p4 = get_pattern_mask(p, 0b0101, True, True)
+        >>> list(t[mask4]) == [0,2,3,6,7,8] and list(p4) == [0,2,2,2,2,8]
+        True
+    
+    Note:
+        The function is designed to return a bitmask instead of directly
+        filtering the timestamps, to allow subsequent post-processing based
+        on the bitmask, e.g. inverting the returned bitmask, or mark patterns.
+    """
+    
+    # Fixed pattern
+    if not mask:
+        pmask = (p == pattern)
+        if invert:
+            pmask = ~pmask
+        masked = p[pmask]
+
+    # Pattern as bitmask
+    else:
+        if not invert:
+            _p = (p & pattern)  # patterns containing bitmask bits
+            pmask = (_p != 0)
+            masked = _p[pmask]
+        else:
+            # Set bit 4 to indicate dummy events, since
+            # non-events already do not contain the bit pattern
+            _p = np.where(p == 0, 16, p)
+            _p = _p ^ (_p & pattern)  # patterns with bitmask removed
+            pmask = (_p != 0)
+            masked = _p[pmask]  # return detector patterns after masking
+            masked = np.where(masked == 16, 0, masked)  # recover dummy events
+    
+    return pmask, masked
+
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
