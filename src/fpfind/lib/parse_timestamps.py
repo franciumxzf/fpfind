@@ -366,7 +366,15 @@ def get_pattern_mask(
     
     return pmask, masked
 
-    
+def get_timing_mask(
+        t: list,
+        start: float = None,
+        end: float = None,
+    ) -> Tuple[list, list]:
+    """Returns a mask where timestamps are bounded between start and end."""
+    return NotImplemented()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
@@ -375,6 +383,13 @@ if __name__ == "__main__":
     parser.add_argument("-q", action="store_true", help="Suppress progress indicators")
     parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format")
     parser.add_argument("-x", action="store_true", help="Output legacy format")
+
+    # Filtering
+    # Not supported with streaming
+    parser.add_argument("--pfilter-pattern", type=int, help="Pattern filtering: pattern")
+    parser.add_argument("--pfilter-mask", action="store_true", help="Pattern filtering: set mask option")
+    parser.add_argument("--pfilter-invert", action="store_true", help="Pattern filtering: set invert option")
+
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
 
@@ -382,6 +397,7 @@ if __name__ == "__main__":
     # otherwise run as a normal script (for interactive mode)
     if len(sys.argv) > 1:
         args = parser.parse_args()
+        print(args)
 
         # Check outfile supplied if '-p' not supplied
         if not args.p and not args.outfile:
@@ -403,6 +419,12 @@ if __name__ == "__main__":
 
         else:
             t, p = read(filepath, args.X)
+
+            # Apply pattern
+            if args.pfilter_pattern is not None:
+                mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
+                t = t[mask]
+                
             if args.p:
                 print_statistics(filepath, t, p)
             else:
