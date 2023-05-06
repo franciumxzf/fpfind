@@ -18,6 +18,7 @@
 #   2022-10-07 Currently does not deal with dummy events and blinding events, all set to 0
 
 import argparse
+import bisect
 import pathlib
 import warnings
 import struct
@@ -370,9 +371,46 @@ def get_timing_mask(
         t: list,
         start: float = None,
         end: float = None,
-    ) -> Tuple[list, list]:
-    """Returns a mask where timestamps are bounded between start and end."""
-    return NotImplemented()
+    ) -> list:
+    """Returns a mask where timestamps are bounded between start and end.
+    
+    The timing array is already assumed to be sorted, as part of the timestamp
+    filespec.
+
+    Examples:
+
+        >>> t = np.array([2,4,5,8])
+
+        >>> mask1 = get_timing_mask(t, 4, 8)  # range at boundaries
+        >>> list(t[mask1]) == [4,5,8]
+        True
+
+        >>> mask2 = get_timing_mask(t, 3, 6)  # range outside boundaries
+        >>> list(t[mask2]) == [4,5]
+        True
+
+        >>> mask3 = get_timing_mask(t, 9, 100)  # too high
+        >>> list(t[mask3]) == []
+        True
+
+        >>> mask4 = get_timing_mask(t, 0, 1)  # too low
+        >>> list(t[mask4]) == []
+        True
+
+        >>> mask5 = get_timing_mask(t, 5, 5)  # end is inclusive
+        >>> list(t[mask5]) == [5]
+        True
+    """
+    # Short-circuit if no results present
+    mask = np.zeros(len(t), dtype=bool)
+    if len(t) == 0 or start > t[-1] or end < t[0]:
+        return mask
+    
+    # Binary search
+    i = bisect.bisect_left(t, start)
+    j = bisect.bisect_right(t, end)
+    mask[i:j] = True
+    return mask
 
 
 if __name__ == "__main__":
@@ -389,6 +427,8 @@ if __name__ == "__main__":
     parser.add_argument("--pfilter-pattern", type=int, help="Pattern filtering: pattern")
     parser.add_argument("--pfilter-mask", action="store_true", help="Pattern filtering: set mask option")
     parser.add_argument("--pfilter-invert", action="store_true", help="Pattern filtering: set invert option")
+    parser.add_argument("--tfilter-start", type=int, help="Time filtering: start timestamp")
+    parser.add_argument("--tfilter-end", type=int, help="Time filtering: end timestamp")
 
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
@@ -424,6 +464,10 @@ if __name__ == "__main__":
             if args.pfilter_pattern is not None:
                 mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
                 t = t[mask]
+            if args.tfilter_start is not None and args.tfilter_end is not None:
+                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
+                t = t[mask]
+                p = p[mask]
                 
             if args.p:
                 print_statistics(filepath, t, p)
