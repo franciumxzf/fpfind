@@ -229,8 +229,8 @@ def print_statistics(filename: str, t: list, p: list):
         ch4_counts=count(p & 0b1000 != 0),
         multi_counts=count(np.isin(p, (0, 1, 2, 4, 8), invert=True)),
         non_counts=count(p == 0),
-        duration=duration,
-        event_rate=int(len(t)//duration),
+        start_timestamp=t[0],
+        end_timestamp=t[-1],
         patterns=sorted(np.unique(p)),
     )
 
@@ -289,8 +289,8 @@ def print_statistics_stream(
         ch4_counts=count_p4,
         multi_counts=count_mp,
         non_counts=count_np,
-        duration=duration,
-        event_rate=int(num_events//duration),
+        start_timestamp=first_t,
+        end_timestamp=last_t,
         patterns=sorted(set_p),
     )
 
@@ -304,11 +304,15 @@ def print_statistics_report(
         ch4_counts: Optional[int] = None,
         multi_counts: Optional[int] = None,
         non_counts: Optional[int] = None,
-        duration: Optional[float] = None,
-        event_rate: Optional[float] = None,
+        start_timestamp: Optional[float] = None,
+        end_timestamp: Optional[float] = None,
         patterns: Optional[list] = None,
     ):
-    """Prints the statistics report."""
+    """Prints the statistics report.
+    
+    With the exception of 'filesize', all optional fields must be
+    present if 'num_events' > 0.
+    """
 
     print(f"Name: {str(filename)}")
     if filesize is not None:
@@ -318,14 +322,17 @@ def print_statistics_report(
         width = int(np.floor(np.log10(num_events))) + 1
     print(    f"Total events    : {num_events:>{width}d}")
     if num_events != 0:
+        duration = (end_timestamp-start_timestamp)*1e-9
         print(f"  Channel 1     : {ch1_counts:>{width}d}")
         print(f"  Channel 2     : {ch2_counts:>{width}d}")
         print(f"  Channel 3     : {ch3_counts:>{width}d}")
         print(f"  Channel 4     : {ch4_counts:>{width}d}")
         print(f"  Multi-channel : {multi_counts:>{width}d}")
         print(f"  No channel    : {non_counts:>{width}d}")
-        print(f"Total duration (s): {duration:0.9f}")
-        print(f"Event rate (/s): {event_rate}")
+        print(f"Duration (s) : {duration:15.9f}")
+        print(f"  ~ start    : {start_timestamp*1e-9:>15.9f}")
+        print(f"  ~ end      : {end_timestamp*1e-9:>15.9f}")
+        print(f"Event rate (/s) : {int(num_events//duration)}")
         print(f"Detection patterns: {patterns}")
 
 def get_pattern_mask(
@@ -413,6 +420,7 @@ def get_timing_mask(
     
     The timing array is already assumed to be sorted, as part of the timestamp
     filespec. If 'start' or 'end' is None, the range is assumed unbounded in respective direction.
+    Start and end time are in seconds (not ns since typical usecase as rough filter anyway).
 
     Examples:
 
@@ -450,8 +458,12 @@ def get_timing_mask(
     mask = np.zeros(len(t), dtype=bool)
     if start is None:
         start = t[0]
+    else:
+        start *= 1e9  # convert s -> ns
     if end is None:
         end = t[-1]
+    else:
+        end *= 1e9  # convert s -> ns
     if len(t) == 0 or start > t[-1] or end < t[0]:
         return mask
     
