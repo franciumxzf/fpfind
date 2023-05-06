@@ -23,7 +23,7 @@ import pathlib
 import warnings
 import struct
 import sys
-from typing import Tuple
+from typing import Tuple, Optional
 from collections.abc import Iterator
 
 import numpy as np
@@ -369,13 +369,13 @@ def get_pattern_mask(
 
 def get_timing_mask(
         t: list,
-        start: float = None,
-        end: float = None,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
     ) -> list:
     """Returns a mask where timestamps are bounded between start and end.
     
     The timing array is already assumed to be sorted, as part of the timestamp
-    filespec.
+    filespec. If 'start' or 'end' is None, the range is assumed unbounded in respective direction.
 
     Examples:
 
@@ -400,9 +400,21 @@ def get_timing_mask(
         >>> mask5 = get_timing_mask(t, 5, 5)  # end is inclusive
         >>> list(t[mask5]) == [5]
         True
+
+        >>> mask6 = get_timing_mask(t, start=3, end=None)  # only lower bound
+        >>> list(t[mask6]) == [4,5,8]
+        True
+
+        >>> mask7 = get_timing_mask(t, start=None, end=4)  # only upper bound
+        >>> list(t[mask7]) == [2,4]
+        True
     """
     # Short-circuit if no results present
     mask = np.zeros(len(t), dtype=bool)
+    if start is None:
+        start = t[0]
+    if end is None:
+        end = t[-1]
     if len(t) == 0 or start > t[-1] or end < t[0]:
         return mask
     
@@ -464,7 +476,7 @@ if __name__ == "__main__":
             if args.pfilter_pattern is not None:
                 mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
                 t = t[mask]
-            if args.tfilter_start is not None and args.tfilter_end is not None:
+            if args.tfilter_start is not None or args.tfilter_end is not None:
                 mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
                 t = t[mask]
                 p = p[mask]
