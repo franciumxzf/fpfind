@@ -212,25 +212,27 @@ def print_statistics(filename: str, t: list, p: list):
         timestamp event files, since 'stream_a0' and 'stream_a2'
         not yet implemented.
     """
-    print(f"Name: {str(filename)}")
+    # Collect statistics
+    filesize = None
     if pathlib.Path(filename).is_file():
-        print(f"Filesize (MB): {pathlib.Path(filename).stat().st_size/(1 << 20):.3f}")
-    width = 0
-    if len(t) != 0:
-        width = int(np.floor(np.log10(len(t)))) + 1
-    print(    f"Total events    : {len(t):>{width}d}")
-    if len(t) != 0:
-        count = np.count_nonzero
-        print(f"  Channel 1     : {count(p & 0b0001 != 0):>{width}d}")
-        print(f"  Channel 2     : {count(p & 0b0010 != 0):>{width}d}")
-        print(f"  Channel 3     : {count(p & 0b0100 != 0):>{width}d}")
-        print(f"  Channel 4     : {count(p & 0b1000 != 0):>{width}d}")
-        print(f"  Multi-channel : {count(np.isin(p, (0, 1, 2, 4, 8), invert=True)):>{width}d}")
-        print(f"  No channel    : {count(p == 0):>{width}d}")
-        duration = (t[-1]-t[0])*1e-9
-        print(f"Total duration (s): {duration:0.9f}")
-        print(f"Event rate (/s): {int(len(t)//duration)}")
-        print(f"Detection patterns: {sorted(np.unique(p))}")
+        filesize = pathlib.Path(filename).stat().st_size/(1 << 20)
+    count = np.count_nonzero
+    duration = (t[-1]-t[0])*1e-9
+    
+    print_statistics_report(
+        filename=filename,
+        num_events=len(t),
+        filesize=filesize,
+        ch1_counts=count(p & 0b0001 != 0),
+        ch2_counts=count(p & 0b0010 != 0),
+        ch3_counts=count(p & 0b0100 != 0),
+        ch4_counts=count(p & 0b1000 != 0),
+        multi_counts=count(np.isin(p, (0, 1, 2, 4, 8), invert=True)),
+        non_counts=count(p == 0),
+        duration=duration,
+        event_rate=int(len(t)//duration),
+        patterns=sorted(np.unique(p)),
+    )
 
 def print_statistics_stream(
         filename: str,
@@ -272,24 +274,59 @@ def print_statistics_stream(
     last_t = t[-1]
 
     # Per usual
-    print(f"Name: {str(filename)}")
+    filesize = None
     if pathlib.Path(filename).is_file():
-        print(f"Filesize (MB): {size/(1 << 20):.3f}")
+        filesize = size/(1 << 20)
+    duration = (last_t-first_t)*1e-9
+
+    print_statistics_report(
+        filename=filename,
+        num_events=num_events,
+        filesize=filesize,
+        ch1_counts=count_p1,
+        ch2_counts=count_p2,
+        ch3_counts=count_p3,
+        ch4_counts=count_p4,
+        multi_counts=count_mp,
+        non_counts=count_np,
+        duration=duration,
+        event_rate=int(num_events//duration),
+        patterns=sorted(set_p),
+    )
+
+def print_statistics_report(
+        filename: str,
+        num_events: int,
+        filesize: Optional[float] = None,
+        ch1_counts: Optional[int] = None,
+        ch2_counts: Optional[int] = None,
+        ch3_counts: Optional[int] = None,
+        ch4_counts: Optional[int] = None,
+        multi_counts: Optional[int] = None,
+        non_counts: Optional[int] = None,
+        duration: Optional[float] = None,
+        event_rate: Optional[float] = None,
+        patterns: Optional[list] = None,
+    ):
+    """Prints the statistics report."""
+
+    print(f"Name: {str(filename)}")
+    if filesize is not None:
+        print(f"Filesize (MB): {filesize:.3f}")
     width = 0
     if num_events != 0:
         width = int(np.floor(np.log10(num_events))) + 1
     print(    f"Total events    : {num_events:>{width}d}")
     if num_events != 0:
-        print(f"  Channel 1     : {count_p1:>{width}d}")
-        print(f"  Channel 2     : {count_p2:>{width}d}")
-        print(f"  Channel 3     : {count_p3:>{width}d}")
-        print(f"  Channel 4     : {count_p4:>{width}d}")
-        print(f"  Multi-channel : {count_mp:>{width}d}")
-        print(f"  No channel    : {count_np:>{width}d}")
-        duration = (last_t-first_t)*1e-9
+        print(f"  Channel 1     : {ch1_counts:>{width}d}")
+        print(f"  Channel 2     : {ch2_counts:>{width}d}")
+        print(f"  Channel 3     : {ch3_counts:>{width}d}")
+        print(f"  Channel 4     : {ch4_counts:>{width}d}")
+        print(f"  Multi-channel : {multi_counts:>{width}d}")
+        print(f"  No channel    : {non_counts:>{width}d}")
         print(f"Total duration (s): {duration:0.9f}")
-        print(f"Event rate (/s): {int(num_events//duration)}")
-        print(f"Detection patterns: {sorted(set_p)}")
+        print(f"Event rate (/s): {event_rate}")
+        print(f"Detection patterns: {patterns}")
 
 def get_pattern_mask(
         p: list,
@@ -449,7 +486,6 @@ if __name__ == "__main__":
     # otherwise run as a normal script (for interactive mode)
     if len(sys.argv) > 1:
         args = parser.parse_args()
-        print(args)
 
         # Check outfile supplied if '-p' not supplied
         if not args.p and not args.outfile:
