@@ -112,7 +112,6 @@ def stream_a1(
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
         buffer_size: int = 800_000,
-        disable_formatter: bool = False,
     ):
     """Block streaming variant of 'read_a1'.
 
@@ -121,8 +120,9 @@ def stream_a1(
     'buffer_size' in bytes, other arguments to follow as documented in
     'read_a0'.
 
-    If timestamp formatting is not required, formatter can be disabled
-    using 'disable_formatter' to achieved 50% speed up.
+    If timestamp formatting is not required, the raw timestamp resolution
+    can be used to speed up computation time, i.e. 'resolution' of
+    TSRES.PS4 and 'fractional' of False.
 
     Note that these streamer can easily be extended to perform some
     pre-processing cleanup, see Usage.
@@ -161,16 +161,31 @@ def stream_a1(
 
             data = np.frombuffer(buffer, dtype="=I").reshape(-1, 2)
             t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
-            if not disable_formatter:
-                t = _format_timestamps(t, resolution, fractional)
+            t = _format_timestamps(t, resolution, fractional)
             p = data[:, low_pos] & 0xF
             yield t, p
 
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
+    """Returns conversion of timestamps into desired format and resolution.
+
+    Note:
+        Short-circuit when raw timestamps are requested is applied, i.e.
+        'resolution' of TSRES.PS4 and 'fractional' is False. Avoiding computation
+        across the entire array has significant time-savings, see below:
+
+        >>> import timeit
+        >>> t = np.random.randint(0, int(1e18), size=(100_000,), dtype=np.uint64)
+        >>> _ = timeit.timeit(lambda: _format_timestamps(t, TSRES.PS4, False), number=10_000)
+        # 430 us per loop without short-circuit
+        # 989 ns per loop with short-circuit
+
+        In practice, the number of batches to process is not particularly high,
+        e.g. 1GB timestamp file corresponds to 1250 loops.
+    """
     if fractional:
         t = np.array(t, dtype=np_float)
         t = t / (TSRES.PS4.value/resolution.value)
-    else:
+    elif resolution is not TSRES.PS4:  # short-circuit
         t = np.array(t, dtype=np.uint64)
         t = t // (TSRES.PS4.value//resolution.value)
     return t
@@ -237,6 +252,7 @@ def print_statistics(filename: str, t: list, p: list):
 def print_statistics_stream(
         filename: str,
         stream: Iterator[Tuple],
+        resolution: TSRES = TSRES.NS1,
         block_size: int = 100_000,
         display: bool = True,
     ):
@@ -270,8 +286,8 @@ def print_statistics_stream(
         count_np += count(p == 0)
         set_p.update(np.unique(p))
         if first_t is None:
-            first_t = t[0]
-    last_t = t[-1]
+            first_t = t[0] / resolution.value  # convert to nanoseconds
+    last_t = t[-1] / resolution.value
 
     # Per usual
     filesize = None
@@ -514,8 +530,8 @@ if __name__ == "__main__":
         
         # Check if printing stream first
         if args.p and stream is not None:
-            streamer = stream(filepath, args.X)
-            print_statistics_stream(filepath, streamer, display=(not args.q))
+            streamer = stream(filepath, args.X, TSRES.PS4, False)
+            print_statistics_stream(filepath, streamer, resolution=TSRES.PS4, display=(not args.q))
 
         else:
             t, p = read(filepath, args.X)
