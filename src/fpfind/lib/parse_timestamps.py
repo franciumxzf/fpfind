@@ -42,7 +42,12 @@ else:
         "128-bit floats unsupported in current numpy version, using 64-bit instead."
     )
 
-    
+
+
+#############
+#  READERS  #
+#############
+
 def read_a0(
         filename: str,
         legacy: bool = None,
@@ -82,7 +87,7 @@ def read_a1(
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
     ):
-    """See documentation for 'read_a0'"""
+    """See documentation for 'read_a0'."""
     high_pos = 1; low_pos = 0
     if legacy: high_pos, low_pos = low_pos, high_pos
     with open(filename, "rb") as f:
@@ -98,7 +103,7 @@ def read_a2(
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
     ):
-    """See documentation for 'read_a0'"""
+    """See documentation for 'read_a0'."""
     data = np.genfromtxt(filename, delimiter="\n", dtype="U16")
     data = np.array([int(v,16) for v in data])
     t = np.uint64(data >> 10)
@@ -106,7 +111,7 @@ def read_a2(
     p = data & 0xF
     return t, p
 
-def stream_a1(
+def sread_a1(
         filename: str,
         legacy: bool = False,
         resolution: TSRES = TSRES.NS1,
@@ -153,7 +158,7 @@ def stream_a1(
         #>>> for t, p in stream_a1(...):
         #...     print(t, p)
     """
-    def _stream_a1():
+    def _sread_a1():
         high_pos = 1; low_pos = 0
         if legacy: high_pos, low_pos = low_pos, high_pos
         with open(filename, "rb") as f:
@@ -170,17 +175,17 @@ def stream_a1(
     
     size = pathlib.Path(filename).stat().st_size
     num_batches = int(((size-1) // (buffer_size*8)) + 1)
-    return _stream_a1(), num_batches
+    return _sread_a1(), num_batches
 
-def stream_a0(
+def sread_a0(
         filename: str,
         legacy: bool = None,
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
         buffer_size: int = 100_000,
     ) -> Tuple[Iterator[list,list], int]:
-    """See documentation for 'stream_a1'"""
-    def _stream_a0():
+    """See documentation for 'sread_a1'"""
+    def _sread_a0():
         with open(filename, "r") as f:
             while True:
                 buffer = f.read(buffer_size*18)  # 16 char per event + 2 newlines
@@ -196,17 +201,17 @@ def stream_a0(
 
     size = pathlib.Path(filename).stat().st_size
     num_batches = int(((size-1) // (buffer_size*18)) + 1)
-    return _stream_a0(), num_batches
+    return _sread_a0(), num_batches
 
-def stream_a2(
+def sread_a2(
         filename: str,
         legacy: bool = None,
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
         buffer_size: int = 100_000,
     ) -> Tuple[Iterator[list,list], int]:
-    """See documentation for 'stream_a1'"""
-    def _stream_a2():
+    """See documentation for 'sread_a1'"""
+    def _sread_a2():
         with open(filename, "r") as f:
             while True:
                 buffer = f.read(buffer_size*17)  # 16 char per event + 1 char newline
@@ -222,7 +227,7 @@ def stream_a2(
 
     size = pathlib.Path(filename).stat().st_size
     num_batches = int(((size-1) // (buffer_size*17)) + 1)
-    return _stream_a2(), num_batches
+    return _sread_a2(), num_batches
 
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
     """Returns conversion of timestamps into desired format and resolution.
@@ -248,6 +253,12 @@ def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
         t = np.array(t, dtype=np.uint64)
         t = t // (TSRES.PS4.value//resolution.value)
     return t
+
+
+
+#############
+#  WRITERS  #
+#############
 
 def _consolidate_events(t: list, p: list, sort: bool = False):
     """Packs events into standard a1 timestamp format.
@@ -299,7 +310,7 @@ def swrite_a1(
         legacy: bool = False,
         display: bool = True,
     ):
-    """Writes to file in 'a1' format using input stream.
+    """Block streaming variant of 'write_a1'.
 
     Input stream assumed to have TSRES.NS1 resolution.
 
@@ -359,13 +370,18 @@ def swrite_a2(
             for line in data:
                 f.write(f"{line:016x}\n")
 
+
+
+##############
+#  PRINTERS  #
+##############
+
 def print_statistics(filename: str, t: list, p: list):
     """Prints statistics using timestamp event readers.
     
     Note:
-        Maintained only for legacy reasons, to support a0 and a2
-        timestamp event files, since 'stream_a0' and 'stream_a2'
-        not yet implemented.
+        Maintained only for legacy reasons to support older
+        reading mechanisms, e.g. 'read_a0'.
     """
     # Collect statistics
     count = np.count_nonzero
@@ -390,13 +406,7 @@ def print_statistics_stream(
         resolution: TSRES = TSRES.NS1,
         display: bool = True,
     ):
-    """Prints statistics using timestamp event streamers.
-    
-    'block_size' is defined as number of events per block streamed, which
-    corresponds to 1/8th the size of the read buffer used in the streamer.
-
-    Set 'display' to False to disable progress bar.
-    """
+    """Prints statistics using timestamp event streamers."""
     # Calculate statistics
     first_t = None; last_t = None
     num_events = 0
@@ -417,9 +427,12 @@ def print_statistics_stream(
         count_mp += count(np.isin(p, (0, 1, 2, 4, 8), invert=True))
         count_np += count(p == 0)
         set_p.update(np.unique(p))
-        if first_t is None:
-            first_t = t[0] / resolution.value  # convert to nanoseconds
-    last_t = t[-1] / resolution.value
+        
+        # Store timing only if timestamps not filtered out
+        if len(t) != 0:
+            if first_t is None:
+                first_t = t[0] / resolution.value  # convert to nanoseconds
+            last_t = t[-1] / resolution.value
 
     print_statistics_report(
         filename=filename,
@@ -450,8 +463,7 @@ def print_statistics_report(
     ):
     """Prints the statistics report.
     
-    With the exception of 'filesize', all optional fields must be
-    present if 'num_events' > 0.
+    All optional fields must be present if 'num_events' > 0.
     """
 
     print(f"Name: {str(filename)}")
@@ -475,6 +487,12 @@ def print_statistics_report(
         print(f"  ~ end      : {end_timestamp*1e-9:>15.9f}")
         print(f"Event rate (/s) : {int(num_events//duration)}")
         print(f"Detection patterns: {patterns}")
+
+
+
+###############
+#  FILTERING  #
+###############
 
 def get_pattern_mask(
         p: list,
@@ -615,6 +633,11 @@ def get_timing_mask(
     return mask
 
 
+
+##########
+#  MAIN  #
+##########
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
@@ -623,6 +646,9 @@ if __name__ == "__main__":
     parser.add_argument("-q", action="store_true", help="Suppress progress indicators")
     parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format")
     parser.add_argument("-x", action="store_true", help="Output legacy format")
+    
+    # Support for older read-write mechanisms, i.e. disable batch streaming
+    parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming")
 
     # Filtering
     # Not supported with streaming
@@ -645,7 +671,7 @@ if __name__ == "__main__":
             raise ValueError("destination filepath must be supplied.")
 
         read = [read_a0, read_a1, read_a2][int(args.A)]
-        stream = [stream_a0, stream_a1, stream_a2][int(args.A)]
+        sread = [sread_a0, sread_a1, sread_a2][int(args.A)]
         write = [write_a0, write_a1, write_a2][int(args.a)]
         swrite = [swrite_a0, swrite_a1, swrite_a2][int(args.a)]
 
@@ -654,25 +680,48 @@ if __name__ == "__main__":
         if not filepath.is_file():
             raise ValueError(f"'{args.infile}' is not a file.")
 
-        # Define filter function for event stream
+        # Define filter function for event and event stream
+        has_filtering = \
+            (args.pfilter_pattern is not None) \
+            or (args.tfilter_start is not None) \
+            or (args.tfilter_end is not None)
+        
+        def event_filter(t, p):
+            if args.pfilter_pattern is not None:
+                mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
+                t = t[mask]
+            if args.tfilter_start is not None or args.tfilter_end is not None:
+                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
+                t = t[mask]
+                p = p[mask]
+            return t, p
+
         def inline_filter(stream):
             for t, p in stream:
-                if args.pfilter_pattern is not None:
-                    mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
-                    t = t[mask]
-                if args.tfilter_start is not None or args.tfilter_end is not None:
-                    mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
-                    t = t[mask]
-                    p = p[mask]
-                yield t, p
+                yield event_filter(t, p)
         
-        # Check if printing stream first
-        if args.p and stream is not None:
-            streamer, num_batches = stream(filepath, args.X, TSRES.PS4, False)
-            print_statistics_stream(filepath, streamer, num_batches, resolution=TSRES.PS4, display=(not args.q))
+        # Use legacy read-write mechanisms
+        if args.inmemory:
+            t, p = read(filepath, args.X)
+            t, p = event_filter(t, p)
+            if args.p:
+                print_statistics(filepath, t, p)
+            else:
+                write(args.outfile, t, p, args.x)
 
-        # Check if streamed read + write supported
+        # Check if printing stream first
+        elif args.p:
+            if has_filtering:
+                stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
+                stream = inline_filter(stream)  # requires timestamps in TSRES.NS1 resolution
+                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.NS1, display=(not args.q))
+            else:
+                # Disable timestamp formatting to speed up reads
+                stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
+                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.PS4, display=(not args.q))
+
+        # Write out
         else:
-            streamer, num_batches = stream(filepath, args.X, TSRES.NS1, True)
-            streamer = inline_filter(streamer)
-            swrite(args.outfile, streamer, num_batches, args.x, display=(not args.q))
+            stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
+            stream = inline_filter(stream)
+            swrite(args.outfile, stream, num_batches, args.x, display=(not args.q))
