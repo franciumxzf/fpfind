@@ -172,6 +172,32 @@ def stream_a1(
     num_batches = int(((size-1) // (buffer_size*8)) + 1)
     return _stream_a1(), num_batches
 
+def stream_a2(
+        filename: str,
+        legacy: bool = None,
+        resolution: TSRES = TSRES.NS1,
+        fractional: bool = True,
+        buffer_size: int = 100_000,
+    ) -> Tuple[Iterator[list,list], int]:
+    """See documentation for 'stream_a1'"""
+    def _stream_a2():
+        with open(filename, "r") as f:
+            while True:
+                buffer = f.read(buffer_size*17)  # 16 char per event + 1 char newline
+                if len(buffer) == 0:
+                    break
+
+                data = buffer.strip().split("\n")
+                data = np.array([int(v,16) for v in data])
+                t = np.uint64(data >> 10)
+                t = _format_timestamps(t, resolution, fractional)
+                p = data & 0xF
+                yield t, p
+
+    size = pathlib.Path(filename).stat().st_size
+    num_batches = int(((size-1) // (buffer_size*17)) + 1)
+    return _stream_a2(), num_batches
+
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
     """Returns conversion of timestamps into desired format and resolution.
 
@@ -512,7 +538,7 @@ if __name__ == "__main__":
             raise ValueError("destination filepath must be supplied.")
 
         read = [read_a0, read_a1, read_a2][int(args.A)]
-        stream = [None, stream_a1, None][int(args.A)]
+        stream = [None, stream_a1, stream_a2][int(args.A)]
         write = [write_a0, write_a1, write_a2][int(args.a)]
 
         # Check file size
