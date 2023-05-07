@@ -249,12 +249,26 @@ def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
         t = t // (TSRES.PS4.value//resolution.value)
     return t
 
-def _consolidate_events(t: list, p: list):
-    # float128 is needed, since float64 only encodes 53-bits of precision,
-    # while the high resolution timestamp has 54-bits precision
+def _consolidate_events(t: list, p: list, sort: bool = False):
+    """Packs events into standard a1 timestamp format.
+
+    If sorting is required, such as during timestamp merging or timestamp
+    perturbation, set 'sort' to True. This invokes O(NlogN) quick sort.
+
+    Args:
+        t: Timestamp array, in units of TSRES.NS1.
+        p: Detector pattern array.
+        sort: If events should be further sorted in chronological order.
+    
+    Note:
+        float128 is needed, since float64 only encodes 53-bits of precision,
+        while the high resolution timestamp has 54-bits precision.
+    """
     data = (np.array(t, dtype=np_float) * TSRES.PS4.value).astype(np.uint64) << 10
     data += np.array(p).astype(np.uint64)
-    return np.sort(data)
+    if sort:
+        data = np.sort(data)
+    return data
 
 def write_a2(filename: str, t: list, p: list, legacy: bool = None):
     data = _consolidate_events(t, p)
@@ -277,6 +291,39 @@ def write_a1(filename: str, t: list, p: list, legacy: bool = False):
             if legacy:
                 line = int(line); line = ((line & 0xFFFFFFFF) << 32) + (line >> 32)
             f.write(struct.pack("=Q", line))
+
+def swrite_a1(
+        filename: str,
+        stream: Iterator[Tuple],
+        num_batches: Optional[int] = None,
+        legacy: bool = False,
+        display: bool = True,
+    ):
+    """Writes to file in 'a1' format using input stream.
+
+    Input stream assumed to have TSRES.NS1 resolution.
+
+    Args:
+        filename: Destination filename.
+        stream: Input stream, in TSRES.NS1 resolution.
+        num_batches: Number of batches in stream.
+        legacy: If output timestamp format should be in legacy format.
+        display: If progress bar should be displayed during write.
+
+    Note:
+        Settling on a fixed resolution allows for more consistent interface
+        for filtering functions. Code runtime with filtering will take a hit,
+        however - this is a future todo.
+    """
+    if display:
+        stream = tqdm.tqdm(stream, total=num_batches)
+    with open(filename, "wb") as f:
+        for t, p in stream:
+            events = _consolidate_events(t, p)
+            for line in events:
+                if legacy:
+                    line = int(line); line = ((line & 0xFFFFFFFF) << 32) + (line >> 32)
+                f.write(struct.pack("=Q", line))
 
 def print_statistics(filename: str, t: list, p: list):
     """Prints statistics using timestamp event readers.
@@ -566,6 +613,7 @@ if __name__ == "__main__":
         read = [read_a0, read_a1, read_a2][int(args.A)]
         stream = [stream_a0, stream_a1, stream_a2][int(args.A)]
         write = [write_a0, write_a1, write_a2][int(args.a)]
+        swrite = [None, swrite_a1, None][int(args.a)]
 
         # Check file size
         filepath = pathlib.Path(args.infile)
@@ -577,6 +625,12 @@ if __name__ == "__main__":
             streamer, num_batches = stream(filepath, args.X, TSRES.PS4, False)
             print_statistics_stream(filepath, streamer, num_batches, resolution=TSRES.PS4, display=(not args.q))
 
+        # Check if streamed read + write supported
+        elif stream is not None and swrite is not None:
+            streamer, num_batches = stream(filepath, args.X, TSRES.NS1, True)
+            swrite(args.outfile, streamer, num_batches, args.x, display=(not args.q))
+
+        # Regular read and write
         else:
             t, p = read(filepath, args.X)
 
