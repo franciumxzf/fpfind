@@ -105,14 +105,14 @@ def read_a2(
     t = _format_timestamps(t, resolution, fractional)
     p = data & 0xF
     return t, p
-    
+
 def stream_a1(
         filename: str,
-        legacy: bool,
+        legacy: bool = False,
         resolution: TSRES = TSRES.NS1,
         fractional: bool = True,
-        buffer_size: int = 800_000,
-    ):
+        buffer_size: int = 100_000,
+    ) -> Tuple[Iterator[list,list], int]:
     """Block streaming variant of 'read_a1'.
 
     For large timestamp datasets where either not all timestamps need
@@ -126,6 +126,9 @@ def stream_a1(
 
     Note that these streamer can easily be extended to perform some
     pre-processing cleanup, see Usage.
+
+    Args:
+        buffer_size: Buffer size in number of events.
 
     Usage:
         # Application note: Block preprocessing
@@ -150,20 +153,24 @@ def stream_a1(
         #>>> for t, p in stream_a1(...):
         #...     print(t, p)
     """
-    high_pos = 1; low_pos = 0
-    if legacy: high_pos, low_pos = low_pos, high_pos
-    # Stream statistics
-    with open(filename, "rb") as f:
-        while True:
-            buffer = f.read(buffer_size)
-            if len(buffer) == 0:
-                break
+    def _stream_a1():
+        high_pos = 1; low_pos = 0
+        if legacy: high_pos, low_pos = low_pos, high_pos
+        with open(filename, "rb") as f:
+            while True:
+                buffer = f.read(buffer_size*8)  # 8 bytes per event
+                if len(buffer) == 0:
+                    break
 
-            data = np.frombuffer(buffer, dtype="=I").reshape(-1, 2)
-            t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
-            t = _format_timestamps(t, resolution, fractional)
-            p = data[:, low_pos] & 0xF
-            yield t, p
+                data = np.frombuffer(buffer, dtype="=I").reshape(-1, 2)
+                t = ((np.uint64(data[:, high_pos]) << 22) + (data[:, low_pos] >> 10))
+                t = _format_timestamps(t, resolution, fractional)
+                p = data[:, low_pos] & 0xF
+                yield t, p
+    
+    size = pathlib.Path(filename).stat().st_size
+    num_batches = int(((size-1) // (buffer_size*8)) + 1)
+    return _stream_a1(), num_batches
 
 def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
     """Returns conversion of timestamps into desired format and resolution.
@@ -228,16 +235,10 @@ def print_statistics(filename: str, t: list, p: list):
         not yet implemented.
     """
     # Collect statistics
-    filesize = None
-    if pathlib.Path(filename).is_file():
-        filesize = pathlib.Path(filename).stat().st_size/(1 << 20)
     count = np.count_nonzero
-    duration = (t[-1]-t[0])*1e-9
-    
     print_statistics_report(
         filename=filename,
         num_events=len(t),
-        filesize=filesize,
         ch1_counts=count(p & 0b0001 != 0),
         ch2_counts=count(p & 0b0010 != 0),
         ch3_counts=count(p & 0b0100 != 0),
@@ -252,8 +253,8 @@ def print_statistics(filename: str, t: list, p: list):
 def print_statistics_stream(
         filename: str,
         stream: Iterator[Tuple],
+        num_batches: Optional[int] = None,
         resolution: TSRES = TSRES.NS1,
-        block_size: int = 100_000,
         display: bool = True,
     ):
     """Prints statistics using timestamp event streamers.
@@ -264,11 +265,8 @@ def print_statistics_stream(
     Set 'display' to False to disable progress bar.
     """
     # Calculate statistics
-    size = pathlib.Path(filename).stat().st_size
-    num_events = int(size // 8)
-    # Calculate number of batches, accounting for off-by-one error
-    num_batches = int(((size-1) // block_size // 8) + 1) # one event is 64-bits / 8-bytes
     first_t = None; last_t = None
+    num_events = 0
     count_p1 = 0; count_p2 = 0; count_p3 = 0; count_p4 = 0
     count_mp = 0; count_np = 0
     set_p = set()
@@ -278,6 +276,7 @@ def print_statistics_stream(
     if display:
         stream = tqdm.tqdm(stream, total=num_batches)
     for t, p in stream:
+        num_events += len(p)
         count_p1 += count(p & 0b0001 != 0)
         count_p2 += count(p & 0b0010 != 0)
         count_p3 += count(p & 0b0100 != 0)
@@ -289,16 +288,9 @@ def print_statistics_stream(
             first_t = t[0] / resolution.value  # convert to nanoseconds
     last_t = t[-1] / resolution.value
 
-    # Per usual
-    filesize = None
-    if pathlib.Path(filename).is_file():
-        filesize = size/(1 << 20)
-    duration = (last_t-first_t)*1e-9
-
     print_statistics_report(
         filename=filename,
         num_events=num_events,
-        filesize=filesize,
         ch1_counts=count_p1,
         ch2_counts=count_p2,
         ch3_counts=count_p3,
@@ -313,7 +305,6 @@ def print_statistics_stream(
 def print_statistics_report(
         filename: str,
         num_events: int,
-        filesize: Optional[float] = None,
         ch1_counts: Optional[int] = None,
         ch2_counts: Optional[int] = None,
         ch3_counts: Optional[int] = None,
@@ -331,7 +322,8 @@ def print_statistics_report(
     """
 
     print(f"Name: {str(filename)}")
-    if filesize is not None:
+    if pathlib.Path(filename).is_file():
+        filesize = pathlib.Path(filename).stat().st_size/(1 << 20)
         print(f"Filesize (MB): {filesize:.3f}")
     width = 0
     if num_events != 0:
@@ -530,8 +522,8 @@ if __name__ == "__main__":
         
         # Check if printing stream first
         if args.p and stream is not None:
-            streamer = stream(filepath, args.X, TSRES.PS4, False)
-            print_statistics_stream(filepath, streamer, resolution=TSRES.PS4, display=(not args.q))
+            streamer, num_batches = stream(filepath, args.X, TSRES.PS4, False)
+            print_statistics_stream(filepath, streamer, num_batches, resolution=TSRES.PS4, display=(not args.q))
 
         else:
             t, p = read(filepath, args.X)
