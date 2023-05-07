@@ -629,8 +629,8 @@ if __name__ == "__main__":
     parser.add_argument("--pfilter-pattern", type=int, help="Pattern filtering: pattern")
     parser.add_argument("--pfilter-mask", action="store_true", help="Pattern filtering: set mask option")
     parser.add_argument("--pfilter-invert", action="store_true", help="Pattern filtering: set invert option")
-    parser.add_argument("--tfilter-start", type=int, help="Time filtering: start timestamp")
-    parser.add_argument("--tfilter-end", type=int, help="Time filtering: end timestamp")
+    parser.add_argument("--tfilter-start", type=float, help="Time filtering: start timestamp")
+    parser.add_argument("--tfilter-end", type=float, help="Time filtering: end timestamp")
 
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
@@ -653,6 +653,18 @@ if __name__ == "__main__":
         filepath = pathlib.Path(args.infile)
         if not filepath.is_file():
             raise ValueError(f"'{args.infile}' is not a file.")
+
+        # Define filter function for event stream
+        def inline_filter(stream):
+            for t, p in stream:
+                if args.pfilter_pattern is not None:
+                    mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
+                    t = t[mask]
+                if args.tfilter_start is not None or args.tfilter_end is not None:
+                    mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
+                    t = t[mask]
+                    p = p[mask]
+                yield t, p
         
         # Check if printing stream first
         if args.p and stream is not None:
@@ -660,24 +672,7 @@ if __name__ == "__main__":
             print_statistics_stream(filepath, streamer, num_batches, resolution=TSRES.PS4, display=(not args.q))
 
         # Check if streamed read + write supported
-        elif stream is not None and swrite is not None:
-            streamer, num_batches = stream(filepath, args.X, TSRES.NS1, True)
-            swrite(args.outfile, streamer, num_batches, args.x, display=(not args.q))
-
-        # Regular read and write
         else:
-            t, p = read(filepath, args.X)
-
-            # Apply pattern
-            if args.pfilter_pattern is not None:
-                mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
-                t = t[mask]
-            if args.tfilter_start is not None or args.tfilter_end is not None:
-                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
-                t = t[mask]
-                p = p[mask]
-                
-            if args.p:
-                print_statistics(filepath, t, p)
-            else:
-                write(args.outfile, t, p, args.x)
+            streamer, num_batches = stream(filepath, args.X, TSRES.NS1, True)
+            streamer = inline_filter(streamer)
+            swrite(args.outfile, streamer, num_batches, args.x, display=(not args.q))
