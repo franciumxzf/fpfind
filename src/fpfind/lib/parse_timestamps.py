@@ -325,6 +325,40 @@ def swrite_a1(
                     line = int(line); line = ((line & 0xFFFFFFFF) << 32) + (line >> 32)
                 f.write(struct.pack("=Q", line))
 
+def swrite_a0(
+        filename: str,
+        stream: Iterator[Tuple],
+        num_batches: Optional[int] = None,
+        legacy: Optional[bool] = None,
+        display: bool = True,
+    ):
+    """See documentation for 'swrite_a1'."""
+    if display:
+        stream = tqdm.tqdm(stream, total=num_batches)
+    with open(filename, "w") as f:
+        for t, p in stream:
+            events = _consolidate_events(t, p)
+            data = np.empty((2*events.size,), dtype=np.uint32)
+            data[0::2] = (events & 0xFFFFFFFF); data[1::2] = (events >> 32)
+            for line in data:
+                f.write(f"{line:08x}\n")
+
+def swrite_a2(
+        filename: str,
+        stream: Iterator[Tuple],
+        num_batches: Optional[int] = None,
+        legacy: Optional[bool] = None,
+        display: bool = True,
+    ):
+    """See documentation for 'swrite_a1'."""
+    if display:
+        stream = tqdm.tqdm(stream, total=num_batches)
+    with open(filename, "w") as f:
+        for t, p in stream:
+            data = _consolidate_events(t, p)
+            for line in data:
+                f.write(f"{line:016x}\n")
+
 def print_statistics(filename: str, t: list, p: list):
     """Prints statistics using timestamp event readers.
     
@@ -613,7 +647,7 @@ if __name__ == "__main__":
         read = [read_a0, read_a1, read_a2][int(args.A)]
         stream = [stream_a0, stream_a1, stream_a2][int(args.A)]
         write = [write_a0, write_a1, write_a2][int(args.a)]
-        swrite = [None, swrite_a1, None][int(args.a)]
+        swrite = [swrite_a0, swrite_a1, swrite_a2][int(args.a)]
 
         # Check file size
         filepath = pathlib.Path(args.infile)
