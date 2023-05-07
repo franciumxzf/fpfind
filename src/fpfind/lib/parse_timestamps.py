@@ -641,22 +641,21 @@ def get_timing_mask(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
-    parser.add_argument("-X", action="store_true", help="Input legacy format")
-    parser.add_argument("-p", action="store_true", help="Print statistics")
-    parser.add_argument("-q", action="store_true", help="Suppress progress indicators")
-    parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format")
-    parser.add_argument("-x", action="store_true", help="Output legacy format")
-    
-    # Support for older read-write mechanisms, i.e. disable batch streaming
-    parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming")
+    parser.add_argument("-X", action="store_true", help="Use legacy input format")
+    parser.add_argument("-a", choices=["0","1","2"], default="1", help="Output timestamp format, defaults to 1")
+    parser.add_argument("-x", action="store_true", help="Use legacy output format")
+    parser.add_argument("-p", "--print", action="store_true", help="Print statistics")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress indicators")
 
     # Filtering
-    # Not supported with streaming
     parser.add_argument("--pfilter-pattern", type=int, help="Pattern filtering: pattern")
     parser.add_argument("--pfilter-mask", action="store_true", help="Pattern filtering: set mask option")
     parser.add_argument("--pfilter-invert", action="store_true", help="Pattern filtering: set invert option")
-    parser.add_argument("--tfilter-start", type=float, help="Time filtering: start timestamp")
-    parser.add_argument("--tfilter-end", type=float, help="Time filtering: end timestamp")
+    parser.add_argument("--tfilter-start", type=float, help="Time filtering: start timestamp, in seconds")
+    parser.add_argument("--tfilter-end", type=float, help="Time filtering: end timestamp, in seconds")
+    
+    # Support for older read-write mechanisms, i.e. disable batch streaming
+    parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming")
 
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
