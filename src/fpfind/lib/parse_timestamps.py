@@ -666,7 +666,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         # Check outfile supplied if '-p' not supplied
-        if not args.p and not args.outfile:
+        if not args.print and not args.outfile:
             raise ValueError("destination filepath must be supplied.")
 
         read = [read_a0, read_a1, read_a2][int(args.A)]
@@ -709,18 +709,18 @@ if __name__ == "__main__":
                 write(args.outfile, t, p, args.x)
 
         # Check if printing stream first
-        elif args.p:
+        elif args.print:
             if has_filtering:
                 stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
                 stream = inline_filter(stream)  # requires timestamps in TSRES.NS1 resolution
-                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.NS1, display=(not args.q))
+                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.NS1, display=(not args.quiet))
             else:
                 # Disable timestamp formatting to speed up reads
                 stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
-                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.PS4, display=(not args.q))
+                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.PS4, display=(not args.quiet))
 
         # Write out
         else:
             stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
             stream = inline_filter(stream)
-            swrite(args.outfile, stream, num_batches, args.x, display=(not args.q))
+            swrite(args.outfile, stream, num_batches, args.x, display=(not args.quiet))
