@@ -583,19 +583,18 @@ def get_pattern_mask(
         masked = p[pmask]
 
     # Pattern as bitmask
+    elif not invert:
+        _p = (p & pattern)  # patterns containing bitmask bits
+        pmask = (_p != 0)
+        masked = _p[pmask]
     else:
-        if not invert:
-            _p = (p & pattern)  # patterns containing bitmask bits
-            pmask = (_p != 0)
-            masked = _p[pmask]
-        else:
-            # Set bit 4 to indicate dummy events, since
-            # non-events already do not contain the bit pattern
-            _p = np.where(p == 0, 16, p)
-            _p = _p ^ (_p & pattern)  # patterns with bitmask removed
-            pmask = (_p != 0)
-            masked = _p[pmask]  # return detector patterns after masking
-            masked = np.where(masked == 16, 0, masked)  # recover dummy events
+        # Set bit 4 to indicate dummy events, since
+        # non-events already do not contain the bit pattern
+        _p = np.where(p == 0, 16, p)
+        _p = _p ^ (_p & pattern)  # patterns with bitmask removed
+        pmask = (_p != 0)
+        masked = _p[pmask]  # return detector patterns after masking
+        masked = np.where(masked == 16, 0, masked)  # recover dummy events
     
     return pmask, masked
 
@@ -619,52 +618,62 @@ def get_timing_mask(
 
     Examples:
 
-        >>> t = np.array([2,4,5,8])
+        >>> to_ns = lambda ts: [t * 1e9 for t in ts]
+        >>> t = np.array(to_ns([2,4,5,8]))
 
         >>> mask1 = get_timing_mask(t, 4, 8)  # range at boundaries
-        >>> list(t[mask1]) == [4,5,8]
+        >>> list(t[mask1]) == to_ns([4,5,8])
         True
 
         >>> mask2 = get_timing_mask(t, 3, 6)  # range outside boundaries
-        >>> list(t[mask2]) == [4,5]
+        >>> list(t[mask2]) == to_ns([4,5])
         True
 
         >>> mask3 = get_timing_mask(t, 9, 100)  # too high
-        >>> list(t[mask3]) == []
+        >>> list(t[mask3]) == to_ns([])
         True
 
         >>> mask4 = get_timing_mask(t, 0, 1)  # too low
-        >>> list(t[mask4]) == []
+        >>> list(t[mask4]) == to_ns([])
         True
 
         >>> mask5 = get_timing_mask(t, 5, 5)  # end is inclusive
-        >>> list(t[mask5]) == [5]
+        >>> list(t[mask5]) == to_ns([5])
         True
 
         >>> mask6 = get_timing_mask(t, start=3, end=None)  # only lower bound
-        >>> list(t[mask6]) == [4,5,8]
+        >>> list(t[mask6]) == to_ns([4,5,8])
         True
 
         >>> mask7 = get_timing_mask(t, start=None, end=4)  # only upper bound
-        >>> list(t[mask7]) == [2,4]
+        >>> list(t[mask7]) == to_ns([2,4])
         True
     """
     # Short-circuit if no results present
     mask = np.zeros(len(t), dtype=bool)
-    if start is None:
-        start = t[0]
-    else:
-        start *= (1e9 * resolution.value)  # convert s -> ns -> resolution
-    if end is None:
-        end = t[-1]
-    else:
-        end *= (1e9 * resolution.value)  # convert s -> ns -> resolution\
-    if len(t) == 0 or start > t[-1] or end < t[0]:
+    if len(t) == 0:
         return mask
     
-    # Binary search
-    i = bisect.bisect_left(t, start)
-    j = bisect.bisect_right(t, end)
+    # Parse start argument
+    if start is None:
+        start = t[0]
+        i = 0
+    else:
+        start *= (1e9 * resolution.value)  # convert s -> ns -> resolution
+        i = bisect.bisect_left(t, start)  # binary search
+    if start > t[-1]:
+        return mask
+    
+    # Parse end argument
+    if end is None:
+        end = t[-1]
+        j = len(t)
+    else:
+        end *= (1e9 * resolution.value)  # convert s -> ns -> resolution
+        j = bisect.bisect_right(t, end)  # binary search
+    if end < t[0]:
+        return mask
+
     mask[i:j] = True
     return mask
 
