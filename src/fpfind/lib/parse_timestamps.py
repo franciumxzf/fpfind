@@ -1,21 +1,51 @@
 #!/usr/bin/env python3
 # Justin, 2022-10-07
-# Take in any set of timestamp data, and converts it
+# Take in any set of timestamp data, and reads/converts it
 #
 # This is for timestamp7 data, i.e. 4ps data
 # -a0 is hex data, -a1 is binary, -a2 binary text
-# intermediate data: t, d
+# intermediate data: t, p
 #
-# Sample recipes:
+#
+# Usage:
 #
 #   Split timestamp data on same channel into two different timestamp files:
-#     >>> t, p = read_a1("data/0_individualdata/singletimestampnodelay.a1.dat", legacy=True)
-#     >>> write_a1("data/1_rawevents/raw_alice_202210071600", t[p==1], p[p==1], legacy=True)
-#     >>> write_a1("data/1_rawevents/raw_bob_202210071600", t[p==8], p[p==8], legacy=True)
-#     # echo "202210071600" >> ../data/1_rawevents/raw_time_list
+#
+#     >>> t, p = read_a1("timestampfile.Aa1X.dat", legacy=True)
+#
+#     >>> mask = (p & 1).astype(bool)     # events with bit 0 set
+#     >>> write_a1("alice.Aa1.dat", t[mask], p[mask])
+#
+#     >>> mask = p == 8                   # events with *only* bit 3 set
+#     >>> mask &= ((t > 100) & (t < 120)  # events with timestamp between 100s and 120s
+#     >>> write_a2("bob.Aa2X.txt", t[mask], p[mask], legacy=True)
+#
+#
+#   Equivalent command-line usage (faster since using smaller stream buffers):
+#
+#     > ./parse_timestamps.py -A1 -X -a1 --pfilter-pattern 1 --pfilter-mask \
+#          timestampfile.Aa1X.dat alice.Aa1.dat
+#
+#     > ./parse_timestamps.py -A1 -X -a1 -x --pfilter-pattern 8 --tfilter-start 100 --tfilter-end 120 \
+#          timestampfile.Aa1X.dat bob.Aa2X.txt
+#
+#
+#   Read large timestamp files in Python (stream in small buffers to avoid out-of-memory):
+#
+#     >>> stream, num_batches = sread_a1("timestampfile.Aa1X.dat", legacy=True)
+#     >>> for i, (t, p) in enumerate(stream, start=1):
+#     ...     print(f"Batch: {i}/{num_batches}")
+#     ...     # Do stuff with t and p
+#
+#
+#   Print event statistics:
+#
+#     > ./parse_timestamps.py -A1 -X --print timestampfile.Aa1X.dat
+#
 #
 # Changelog:
 #   2022-10-07 Currently does not deal with dummy events and blinding events, all set to 0
+#   2023-05-09 Add streaming capabilities, minimize inline processing using raw resolution
 
 import argparse
 import bisect
@@ -135,11 +165,9 @@ def sread_a1(
     Args:
         buffer_size: Buffer size in number of events.
 
-    Usage:
-        # Application note: Block preprocessing
-        #>>> for t, p in stream_a1(...):
-        #...     t, p = preprocess(t, p)
-        #...     yield t, p
+    Examples:
+        >>> for t, p in sread_a1(...):
+        ...     print(t, p)
 
     Note:
         Performance of naive streaming is poor (roughly 2 orders magnitude
@@ -153,10 +181,6 @@ def sread_a1(
 
         Where efficiency is desired and number of timestamps is small,
         'read_a1' should be preferred instead.
-
-    Usage:
-        #>>> for t, p in stream_a1(...):
-        #...     print(t, p)
     """
     def _sread_a1():
         high_pos = 1; low_pos = 0
@@ -260,7 +284,7 @@ def _format_timestamps(t: list, resolution: TSRES, fractional: bool):
 #  WRITERS  #
 #############
 
-def _consolidate_events(t: list, p: list, sort: bool = False):
+def _consolidate_events(t: list, p: list, resolution: TSRES = TSRES.NS1, sort: bool = False):
     """Packs events into standard a1 timestamp format.
 
     If sorting is required, such as during timestamp merging or timestamp
@@ -269,34 +293,35 @@ def _consolidate_events(t: list, p: list, sort: bool = False):
     Args:
         t: Timestamp array, in units of TSRES.NS1.
         p: Detector pattern array.
+        resolution: Resolution of timestamps in timestamp array.
         sort: If events should be further sorted in chronological order.
     
     Note:
         float128 is needed, since float64 only encodes 53-bits of precision,
         while the high resolution timestamp has 54-bits precision.
     """
-    data = (np.array(t, dtype=np_float) * TSRES.PS4.value).astype(np.uint64) << 10
+    data = (np.array(t, dtype=np_float) * (TSRES.PS4.value//resolution.value)).astype(np.uint64) << 10
     data += np.array(p).astype(np.uint64)
     if sort:
         data = np.sort(data)
     return data
 
-def write_a2(filename: str, t: list, p: list, legacy: bool = None):
-    data = _consolidate_events(t, p)
+def write_a2(filename: str, t: list, p: list, legacy: bool = None, resolution: TSRES = TSRES.NS1):
+    data = _consolidate_events(t, p, resolution)
     with open(filename, "w") as f:
         for line in data:
             f.write(f"{line:016x}\n")
 
-def write_a0(filename: str, t: list, p: list, legacy: bool = None):
-    events = _consolidate_events(t, p)
+def write_a0(filename: str, t: list, p: list, legacy: bool = None, resolution: TSRES = TSRES.NS1):
+    events = _consolidate_events(t, p, resolution)
     data = np.empty((2*events.size,), dtype=np.uint32)
     data[0::2] = (events & 0xFFFFFFFF); data[1::2] = (events >> 32)
     with open(filename, "w") as f:
         for line in data:
             f.write(f"{line:08x}\n")
 
-def write_a1(filename: str, t: list, p: list, legacy: bool = False):
-    events = _consolidate_events(t, p)
+def write_a1(filename: str, t: list, p: list, legacy: bool = False, resolution: TSRES = TSRES.NS1):
+    events = _consolidate_events(t, p, resolution)
     with open(filename, "wb") as f:
         for line in events:
             if legacy:
@@ -308,6 +333,7 @@ def swrite_a1(
         stream: Iterator[Tuple],
         num_batches: Optional[int] = None,
         legacy: bool = False,
+        resolution: TSRES = TSRES.NS1,
         display: bool = True,
     ):
     """Block streaming variant of 'write_a1'.
@@ -319,6 +345,7 @@ def swrite_a1(
         stream: Input stream, in TSRES.NS1 resolution.
         num_batches: Number of batches in stream.
         legacy: If output timestamp format should be in legacy format.
+        resolution: Resolution of timestamps in input stream.
         display: If progress bar should be displayed during write.
 
     Note:
@@ -330,7 +357,7 @@ def swrite_a1(
         stream = tqdm.tqdm(stream, total=num_batches)
     with open(filename, "wb") as f:
         for t, p in stream:
-            events = _consolidate_events(t, p)
+            events = _consolidate_events(t, p, resolution)
             for line in events:
                 if legacy:
                     line = int(line); line = ((line & 0xFFFFFFFF) << 32) + (line >> 32)
@@ -341,6 +368,7 @@ def swrite_a0(
         stream: Iterator[Tuple],
         num_batches: Optional[int] = None,
         legacy: Optional[bool] = None,
+        resolution: TSRES = TSRES.NS1,
         display: bool = True,
     ):
     """See documentation for 'swrite_a1'."""
@@ -348,7 +376,7 @@ def swrite_a0(
         stream = tqdm.tqdm(stream, total=num_batches)
     with open(filename, "w") as f:
         for t, p in stream:
-            events = _consolidate_events(t, p)
+            events = _consolidate_events(t, p, resolution)
             data = np.empty((2*events.size,), dtype=np.uint32)
             data[0::2] = (events & 0xFFFFFFFF); data[1::2] = (events >> 32)
             for line in data:
@@ -359,6 +387,7 @@ def swrite_a2(
         stream: Iterator[Tuple],
         num_batches: Optional[int] = None,
         legacy: Optional[bool] = None,
+        resolution: TSRES = TSRES.NS1,
         display: bool = True,
     ):
     """See documentation for 'swrite_a1'."""
@@ -366,7 +395,7 @@ def swrite_a2(
         stream = tqdm.tqdm(stream, total=num_batches)
     with open(filename, "w") as f:
         for t, p in stream:
-            data = _consolidate_events(t, p)
+            data = _consolidate_events(t, p, resolution)
             for line in data:
                 f.write(f"{line:016x}\n")
 
@@ -574,12 +603,19 @@ def get_timing_mask(
         t: list,
         start: Optional[float] = None,
         end: Optional[float] = None,
+        resolution: TSRES = TSRES.NS1,
     ) -> list:
     """Returns a mask where timestamps are bounded between start and end.
     
     The timing array is already assumed to be sorted, as part of the timestamp
     filespec. If 'start' or 'end' is None, the range is assumed unbounded in respective direction.
     Start and end time are in seconds (not ns since typical usecase as rough filter anyway).
+
+    Args:
+        t: Timestamp array, in units of 'resolution'.
+        start: Start timestamp, in seconds.
+        end: End timestamp, in seconds.
+        resolution: Resolution of timestamps in timestamp array.
 
     Examples:
 
@@ -618,11 +654,11 @@ def get_timing_mask(
     if start is None:
         start = t[0]
     else:
-        start *= 1e9  # convert s -> ns
+        start *= (1e9 * resolution.value)  # convert s -> ns -> resolution
     if end is None:
         end = t[-1]
     else:
-        end *= 1e9  # convert s -> ns
+        end *= (1e9 * resolution.value)  # convert s -> ns -> resolution\
     if len(t) == 0 or start > t[-1] or end < t[0]:
         return mask
     
@@ -655,7 +691,7 @@ if __name__ == "__main__":
     parser.add_argument("--tfilter-end", type=float, help="Time filtering: end timestamp, in seconds")
     
     # Support for older read-write mechanisms, i.e. disable batch streaming
-    parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming")
+    parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming (retained for legacy reasons)")
 
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
@@ -685,25 +721,25 @@ if __name__ == "__main__":
             or (args.tfilter_start is not None) \
             or (args.tfilter_end is not None)
         
-        def event_filter(t, p):
+        def event_filter(t, p, resolution: TSRES = TSRES.NS1):
             if args.pfilter_pattern is not None:
                 mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
                 t = t[mask]
             if args.tfilter_start is not None or args.tfilter_end is not None:
-                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end)
+                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end, resolution)
                 t = t[mask]
                 p = p[mask]
             return t, p
 
-        def inline_filter(stream):
+        def inline_filter(stream, resolution: TSRES = TSRES.NS1):
             for t, p in stream:
-                yield event_filter(t, p)
+                yield event_filter(t, p, resolution)
         
         # Use legacy read-write mechanisms
         if args.inmemory:
             t, p = read(filepath, args.X)
             t, p = event_filter(t, p)
-            if args.p:
+            if args.print:
                 print_statistics(filepath, t, p)
             else:
                 write(args.outfile, t, p, args.x)
@@ -711,9 +747,9 @@ if __name__ == "__main__":
         # Check if printing stream first
         elif args.print:
             if has_filtering:
-                stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
-                stream = inline_filter(stream)  # requires timestamps in TSRES.NS1 resolution
-                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.NS1, display=(not args.quiet))
+                stream, num_batches = sread(filepath, args.X)  # default 1ns floating-point resolution
+                stream = inline_filter(stream)
+                print_statistics_stream(filepath, stream, num_batches, display=(not args.quiet))
             else:
                 # Disable timestamp formatting to speed up reads
                 stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
@@ -721,6 +757,6 @@ if __name__ == "__main__":
 
         # Write out
         else:
-            stream, num_batches = sread(filepath, args.X, TSRES.NS1, True)
-            stream = inline_filter(stream)
-            swrite(args.outfile, stream, num_batches, args.x, display=(not args.quiet))
+            stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
+            stream = inline_filter(stream, TSRES.PS4)
+            swrite(args.outfile, stream, num_batches, args.x, resolution=TSRES.PS4, display=(not args.quiet))
