@@ -9,6 +9,7 @@ References:
     [2] Epoch header definitions: https://github.com/s-fifteen-instruments/QKDServer/blob/master/S15qkd/utils.py
 """
 
+from dataclasses import dataclass, field
 import datetime as dt
 import logging
 import pathlib
@@ -397,3 +398,93 @@ def write_T1(directory, full_epoch, timestamps, detectors):
         f.write(pack("II", 0, 0))
 
     return target
+
+@dataclass
+class ServiceT3:
+    """Dataclass for T3 file formats.
+
+    Coincidence matrix mapped directly as 2D array:
+
+    [
+        (VV),  VA , (VH),  VD ,
+         AV , (AA),  AH , (AD),
+        (HV),  HA , (HH),  HD ,
+         DV , (DA),  DH , (DD),
+    ]
+    """
+    head: HeadT3
+    coinc_matrix: list = field(default_factory=lambda: [0]*16)
+    garbage: list = field(default_factory=lambda: [0,0])
+    okcount: int = 0
+    qber: float = 0.5  # default random
+
+
+def read_T3(file_name: str) -> ServiceT3:
+    """Used to process rawkey files.
+            
+    Example data:
+    01000001_00100101_00100010_00010100
+      \\    \\
+     alice  bob
+     0100   0001
+    
+    Note:
+        Unpacking was done wrongly in original diagnosis.c code.
+        
+        Functionally the same as 'service_T3' in QKDServer.utils, with
+        some syntatic comments.
+    """
+    # Map single-bit detections to index in 4-array for coinc matrix,
+    # with multi-bit detections set to -1
+    decode = [-1, 0, 1, -1, 2, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1]
+    er_coinc_id = [0, 5, 10, 15]  # VV, AA, HH, DD
+    gd_coinc_id = [2, 7, 8, 13]   # VH, AD, HV, DA 
+    detections = []  # store detection events of pairs
+    headt3 = read_T3_header(file_name)
+    service = ServiceT3(headt3)
+
+    # Check if number of bits per entry according to filespec
+    if headt3.bits_per_entry != 8:
+        logger.warning(f'Not a service file with 8 bits per entry')
+
+    # Digest file
+    HEADER_INFO_SIZE = 16
+    data_b = b"\x00\x00\x00\x00"
+    with open(file_name,"rb") as f:
+        f.seek(HEADER_INFO_SIZE)
+        while True:
+            word = f.read(4)
+            if word == b"":
+                break
+
+            # Since packing in bytes, byteorder is mostly irrelevant
+            # except when verifying zero padding at end of file
+            data, = unpack("<I", word)  # comma for unpacking tuple result
+            data_b = data.to_bytes(4, byteorder="big")
+            detections.extend(data_b)
+    
+    # Verify detections match length entry in header, ignoring \x00 byte padding
+    if headt3.length_entry != len(detections) - data_b.count(0):
+        logger.error(f"Stream 3 size inconsistency: length of entry does not match.")
+    
+    # Assign to coincidence matrix
+    for i in range(headt3.length_entry):
+        detection = detections[i]
+        a = decode[(detection >> 4) & 0xf]  # Alice
+        b = decode[detection & 0xf]  # Bob
+        if a >= 0 and b >= 0:
+            service.coinc_matrix[a * 4 + b] += 1
+            service.okcount += 1
+        else:
+            if a < 0:
+                service.garbage[0] += 1
+            if b < 0:
+                service.garbage[1] += 1
+
+    # Calculate QBER
+    er_coin = sum(service.coinc_matrix[i] for i in er_coinc_id)
+    gd_coin = sum(service.coinc_matrix[i] for i in gd_coinc_id)
+    if er_coin + gd_coin != 0:
+        service.qber = float(round(er_coin / (er_coin + gd_coin), 3))  # ignore garbage
+
+    return service
