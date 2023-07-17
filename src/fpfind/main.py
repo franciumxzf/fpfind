@@ -9,7 +9,8 @@ import pathlib
 
 from fpfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
-UPPER_LIMIT = 5e-5 # whether to put as an option
+DELTA_U_STEP = 5e-5 # whether to put as an option
+DELTA_U_MAX = 2.5e-4
 TIMESTAMP_RESOLUTION = 256
 EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
@@ -35,7 +36,7 @@ def statistical_significance(arr):
     ck = np.max(arr)
     ck_average = np.mean(arr)
     S = (ck - ck_average) / np.std(arr)
-    return S
+    return S                    
 
 def process_timestamp(arr, start_time, delta_t):
     new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
@@ -120,92 +121,25 @@ def time_freq(arr_a, arr_b):
             break
 
     delta_u = 1 / u - 1
-    logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
+    # print("time offset: %d, frequency offset: %f", delta_T1, delta_u)
+    # logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
     return delta_T1, delta_u
 
-def fpfind(alice, bob): # perform plus and minus step size concurrently
-    backup_bob = bob.copy()
-    freq_result = 0
-    plus_freq_result = 0
-    minus_freq_result = 0
-    plus = True
-    always_plus = False
-    always_minus = False
-    time_result, freq_shift1 = time_freq(alice, bob)
-    plus_bob = bob.copy()
-    minus_bob = bob.copy()
-    new_bob = bob / (1 + freq_shift1)
-    while True:
-        if freq_result > 2.5e-4:
-            raise ValueError("Reach algorithm limit")
-            # if reach the limit still cannot obtain the correct result, means need to change the hyperparameters
-        try:
-            time_result, freq_shift2 = time_freq(alice, new_bob)
-            if abs(freq_shift2) < 5e-7 and abs(freq_shift2) <= abs(freq_shift1): # means that the the combined offset is correct
-                if not plus:
-                    freq_result = plus_freq_result
-                    bob = plus_bob
-                elif plus:
-                    freq_result = minus_freq_result
-                    bob = minus_bob
-                bob = bob / (1 + freq_shift1) / (1 + freq_shift2)
-                freq_result = (1 + freq_result) * (1 + freq_shift1) * (1 + freq_shift2) - 1
-                break
-        except ValueError:
-            # if cannot find the peak, go directly plus or minus the step size
-            # but here we agree that our hyperparameter settings are correct
-            pass
-        if always_plus and always_minus:
-            raise RuntimeError
-        if always_plus:
-            plus_bob /= (1 + UPPER_LIMIT)
-            plus_freq_result = (1 + UPPER_LIMIT) * (1 + plus_freq_result) - 1
-            time_result, freq_shift1 = time_freq(alice, plus_bob)
-            new_bob = plus_bob / (1 + freq_shift1)
-            continue
-        if always_minus:
-            minus_bob /= (1 - UPPER_LIMIT)
-            minus_freq_result = (1 - UPPER_LIMIT) * (1 + minus_freq_result) - 1
-            time_result, freq_shift1 = time_freq(alice, minus_bob)
-            new_bob = minus_bob / (1 + freq_shift1)
-            continue
-        if plus:
-            try:
-                plus_bob /= (1 + UPPER_LIMIT)
-                plus_freq_result = (1 + UPPER_LIMIT) * (1 + plus_freq_result) - 1
-                time_result, freq_shift1 = time_freq(alice, plus_bob)
-                new_bob = plus_bob / (1 + freq_shift1)
-                plus = False
-                continue
-            except ValueError:
-                always_minus = True
-        if not plus:
-            try:
-                minus_bob /= (1 - UPPER_LIMIT)
-                minus_freq_result = (1 - UPPER_LIMIT) * (1 + minus_freq_result) - 1
-                time_result, freq_shift1 = time_freq(alice, minus_bob)
-                new_bob = minus_bob / (1 + freq_shift1)
-                plus = True
-                continue
-            except ValueError:
-                always_plus = True
+def fpfind(alice, bob):
+    iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
+    iterating_list[::2] *= -1
+    for i in iterating_list:
+        delta_T, delta_u = time_freq(alice, bob / (1 + DELTA_U_STEP * i))
+        delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
+        if abs(delta_u1) < abs(delta_u) and abs(delta_u1) < 2e-7:
+            delta_u = (1 + DELTA_U_STEP * i) * (1 + delta_u) * (1 + delta_u1) - 1
+            break
+    while abs(delta_u1) > 1e-10:
+        delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
+        delta_u = (1 + delta_u) * (1 + delta_u1) - 1
+    logging.debug(f"time result: {delta_T}, frequency result: {delta_u}")
+    return delta_T, delta_u
     
-    time_result, freq_shift1 = time_freq(alice, bob) # do another pass to double check
-    if abs(freq_shift1) <= abs(freq_shift2):
-        freq_result = (1 + freq_shift1) * (1 + freq_result) - 1
-        while abs(freq_shift1) > 1e-10:
-            bob /= (1 + freq_shift1)
-            time_result, freq_shift1 = time_freq(alice, bob)
-            freq_result = (1 + freq_shift1) * (1 + freq_result) - 1
-    else: # maybe need to redesign here
-        backup_bob /= (1 + UPPER_LIMIT)
-        freq_result = UPPER_LIMIT
-        return fpfind(alice, backup_bob)
-    
-    logging.debug(f"time result: {time_result}, frequency result: {freq_result}")
-    # print(f"{int(time_result):d}\t{int((1 / (1 + freq_result) - 1) * 2e34):d}\n")
-    return time_result, freq_result
-
 def result_for_freqcd(alice, bob):
     alice_copy = alice.copy()
     bob_copy = bob.copy()
