@@ -23,7 +23,7 @@
    by fpfind, and performs a software correction of the timestamps emitted
    by readevents. Parameters are optimized such that the correction can
    be performed using purely 64-bit constructs.
-   
+
    Note that there is no support for Windows - many of the functionality
    used are native to Linux.
 
@@ -31,7 +31,7 @@
    usage:
      freqcd [-i infilename] [-o outfilename] [-x]
             [-f freqcorr]
-                 
+
 
    DATA STREAM OPTIONS:
      -i infilename:   Filename of source events. Can be a file or a socket
@@ -41,6 +41,10 @@
      -o outfilename:  Outfile name for timing corrected events, which can
                       either be a file or socket. Output format is the same as
                       with input. If unspecified, data is written to stdout.
+     -F freqfilename: Filename of frequency correction values. Needs to be
+                      a readable+writeable socket storing newline-delimited
+                      frequency offset values (see '-f' option for format).
+                      If unspecified, the frequency offset will be static.
 
    ENCODING OPTIONS:
      -x:              Specifies if both the raw input and output data streams
@@ -99,6 +103,8 @@ char *errormessage[] = {
     "Unable to allocate memory to outbuffer",
     "Error reading in outfilename",
     "Error opening output stream",
+    "Error reading in freqfilename", /* 10 */
+    "Error opening freq correction stream source",
 };
 int emsg(int code) {
     fprintf(stderr, "%s\n", errormessage[code]);
@@ -118,10 +124,11 @@ int main(int argc, char *argv[]) {
     int fcorr = FCORR_DEFAULT;  // frequency correction value
     char infilename[FNAMELENGTH] = {};  // store filename
     char outfilename[FNAMELENGTH] = {};  // store filename
+    char freqfilename[FNAMELENGTH] = {};  // store filename
     int islegacy = 0;  // mark if format is legacy
     int opt;  // for getopt options
     opterr = 0;  // be quiet when no options supplied
-    while ((opt = getopt(argc, argv, "i:o:f::x")) != EOF) {
+    while ((opt = getopt(argc, argv, "i:o:F:f::x")) != EOF) {
         switch (opt) {
         case 'i':
             if (sscanf(optarg, FNAMEFORMAT, infilename) != 1) return -emsg(2);
@@ -130,6 +137,10 @@ int main(int argc, char *argv[]) {
         case 'o':
             if (sscanf(optarg, FNAMEFORMAT, outfilename) != 1) return -emsg(8);
             outfilename[FNAMELENGTH-1] = 0;  // security termination
+            break;
+        case 'F':
+            if (sscanf(optarg, FNAMEFORMAT, freqfilename) != 1) return -emsg(10);
+            freqfilename[FNAMELENGTH-1] = 0;  // security termination
             break;
         case 'f':
             if (sscanf(optarg, "%d", &fcorr) != 1) return -emsg(4);
@@ -154,6 +165,12 @@ int main(int argc, char *argv[]) {
         if (outhandle == -1) return -emsg(9);
     }
 
+    int freqhandle = 0;  // null by default (not stdin)
+    if (freqfilename[0]) {
+        freqhandle = open(freqfilename, O_RDONLY | O_NONBLOCK);
+        if (freqhandle == -1) return -emsg(11);
+    }
+
     /* initialize input and output buffers */
     struct rawevent *inbuffer;
     inbuffer = (struct rawevent *)malloc(INBUFSIZE);
@@ -175,7 +192,7 @@ int main(int argc, char *argv[]) {
 
     /* inbuffer reading variables */
     int i, j;
-    int inbytesread = 0;  
+    int inbytesread = 0;
     int inbytesread_next = 0;
     int inbytespartial;  // size of partial rawevent remaining in inbufferbyte
 
@@ -201,101 +218,104 @@ int main(int argc, char *argv[]) {
         }
         inbufferbytes_next = &inbufferbytes[inbytespartial];
 
-        /* wait for data on inhandle */
+        /* wait for data on inhandle and freqhandle */
         // TODO: Consider whether to use poll/epoll mechanisms, if frequent
         //       pipe recreation is a concern (high fd).
         FD_ZERO(&rfds);
         FD_SET(inhandle, &rfds);
+        if (freqhandle) FD_SET(freqhandle, &rfds);
         tv.tv_sec = 0;
         tv.tv_usec = RETRYREADWAIT;
-        retval = select(inhandle+1, &rfds, NULL, NULL, &tv);
+        retval = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
         if (retval == -1) {
             fprintf(stderr, "Error %d on select", errno);
             break;  // graceful close
         }
-        if (!FD_ISSET(inhandle, &rfds)) continue;
 
-        /* read data from inhandle */
-        // TODO: Highlight corresponding bug in chopper.c. Note that assigning
-        //       to inbytesread directly can potentially corrupt events.
-        inbytesread_next = read(inhandle, inbufferbytes_next, INBUFSIZE - inbytespartial);
-        if (inbytesread_next == 0) {
-            break;  // no bytes read (i.e. EOF)
-                    // TODO: Check if this should be continue instead,
-                    //       when running ad-infinitum
-        }
-        if (inbytesread_next == -1) {
-            fprintf(stderr, "Error %d on read", errno);
-            break;  // graceful close
-        }
+        if (FD_ISSET(inhandle, &rfds)) {
 
-        /* concatenate new data */
-        inbytesread = inbytespartial + inbytesread_next;
-        eventnum = inbytesread / sizeof(struct rawevent);
-        eventptr = inbuffer;
-
-        /* micro-optimization to initialize reference timestamp */
-        if ((!isset_tsref) && (eventnum > 0)) {
-            low = eventptr->low;
-            high = eventptr->high;
-
-            // Shift burden of swapping if 'legacy' format is used
-            // TODO: Consider a more efficient implementation.
-            if (islegacy) {
-                _swp = low;
-                low = high;
-                high = _swp;
+            /* read data from inhandle */
+            // TODO: Highlight corresponding bug in chopper.c. Note that assigning
+            //       to inbytesread directly can potentially corrupt events.
+            inbytesread_next = read(inhandle, inbufferbytes_next, INBUFSIZE - inbytespartial);
+            if (inbytesread_next == 0) {
+                break;  // no bytes read (i.e. EOF)
+                        // TODO: Check if this should be continue instead,
+                        //       when running ad-infinitum
             }
-            tsref = ((ull)high << 22) | (low >> 10);
-            isset_tsref = 1;  // we are done initializing
-        }
-
-        /* digest events */
-        for (i = 0; i < eventnum; i++) {
-            
-            /* extract timestamp value */
-            // Assumed 4ps timestamps used
-            low = eventptr->low;
-            high = eventptr->high;
-            if (islegacy) {
-                _swp = low;
-                low = high;
-                high = _swp;
+            if (inbytesread_next == -1) {
+                fprintf(stderr, "Error %d on read", errno);
+                break;  // graceful close
             }
-            ts = ((ull)high << 22) | (low >> 10);
+
+            /* concatenate new data */
+            inbytesread = inbytespartial + inbytesread_next;
+            eventnum = inbytesread / sizeof(struct rawevent);
+            eventptr = inbuffer;
+
+            /* micro-optimization to initialize reference timestamp */
+            if ((!isset_tsref) && (eventnum > 0)) {
+                low = eventptr->low;
+                high = eventptr->high;
+
+                // Shift burden of swapping if 'legacy' format is used
+                // TODO: Consider a more efficient implementation.
+                if (islegacy) {
+                    _swp = low;
+                    low = high;
+                    high = _swp;
+                }
+                tsref = ((ull)high << 22) | (low >> 10);
+                isset_tsref = 1;  // we are done initializing
+            }
+
+            /* digest events */
+            for (i = 0; i < eventnum; i++) {
+
+                /* extract timestamp value */
+                // Assumed 4ps timestamps used
+                low = eventptr->low;
+                high = eventptr->high;
+                if (islegacy) {
+                    _swp = low;
+                    low = high;
+                    high = _swp;
+                }
+                ts = ((ull)high << 22) | (low >> 10);
 #ifdef __DEBUG__
-            fprintf(stderr, "[debug] Raw event - %08x %08x\n", high, low);
-            fprintf(stderr, "[debug] |   t_i: %014llx (%020llu)\n", ts, ts);
+                fprintf(stderr, "[debug] Raw event - %08x %08x\n", high, low);
+                fprintf(stderr, "[debug] |   t_i: %014llx (%020llu)\n", ts, ts);
 #endif
 
-            /* calculate timestamp correction */
-            tscorr = ((ll)((ts - tsref) >> FCORR_TBITS1) * fcorr) >> FCORR_TBITS2;
-            ts += tscorr;
+                /* calculate timestamp correction */
+                tscorr = ((ll)((ts - tsref) >> FCORR_TBITS1) * fcorr) >> FCORR_TBITS2;
+                ts += tscorr;
 
-            /* account for 20 hour timestamp overflow condition */
-            // TODO: Need to account for the 20 hour timestamp overflow condition
-            //       which might be a bit messy due to non-monotonically increasing
-            //       timestamps as a result of say, detector timing corrections.
-            //       Consider the following corner cases:
-            //         1. If curr < prev, then prev-curr > 10 hours => overflow.
-            //            Save tsref and set to zero, overflow++.
-            //         2. If curr > prev, then curr-prev > 10 hours => underflow.
-            //            Restore previous tsref, overflow--;
+                /* account for 20 hour timestamp overflow condition */
+                // TODO: Need to account for the 20 hour timestamp overflow condition
+                //       which might be a bit messy due to non-monotonically increasing
+                //       timestamps as a result of say, detector timing corrections.
+                //       Consider the following corner cases:
+                //         1. If curr < prev, then prev-curr > 10 hours => overflow.
+                //            Save tsref and set to zero, overflow++.
+                //         2. If curr > prev, then curr-prev > 10 hours => underflow.
+                //            Restore previous tsref, overflow--;
 
-            /* write corrected timestamp to output buffer */
-            eventptr->high = ts >> 22;
-            eventptr->low = (ts << 10) | (low & 0x3ff);
+                /* write corrected timestamp to output buffer */
+                eventptr->high = ts >> 22;
+                eventptr->low = (ts << 10) | (low & 0x3ff);
 #ifdef __DEBUG__
-            fprintf(stderr, "[debug] |  t'_i: %014llx (%020llu)\n", ts, ts);
-            fprintf(stderr, "[debug] +---------- %08x %08x\n", eventptr->high, eventptr->low);
+                fprintf(stderr, "[debug] |  t'_i: %014llx (%020llu)\n", ts, ts);
+                fprintf(stderr, "[debug] +---------- %08x %08x\n", eventptr->high, eventptr->low);
 #endif
-            if (islegacy) {
-                _swp = eventptr->low;
-                eventptr->low = eventptr->high;
-                eventptr->high = _swp;
+                if (islegacy) {
+                    _swp = eventptr->low;
+                    eventptr->low = eventptr->high;
+                    eventptr->high = _swp;
+                }
+                outbuffer[outevents++] = *eventptr;
+                eventptr++;
             }
-            outbuffer[outevents++] = *eventptr;
-            eventptr++;
         }
 
         // TODO: Shift this back to select call to write only when pipe available,
@@ -313,6 +333,9 @@ int main(int argc, char *argv[]) {
             break;  // graceful close
         }
         outevents = 0;  // clear outbuffer only after successful write
+        eventnum = 0;  // clear events to avoid rewriting:
+                       // occurs when 'freqhandle' available for reading, but
+                       // 'inhandle' has no more events
     }
 
     /* free buffers */
