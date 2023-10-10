@@ -235,6 +235,8 @@ int main(int argc, char *argv[]) {
 
         /* discard previously processed rawevents and
            retain partial rawevent left in buffer */
+        // TODO: Fix potential bug when 'continue' is called, which
+        //       clears the inputbuffer without writing to output stream.
         inbytespartial = inbytesread % sizeof(struct rawevent);
         for (i = inbytesread - inbytespartial, j = 0; j < inbytespartial; i++, j++) {
             inbufferbytes[j] = inbufferbytes[i];
@@ -251,7 +253,7 @@ int main(int argc, char *argv[]) {
         tv.tv_usec = RETRYREADWAIT;
         retval = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
         if (retval == -1) {
-            fprintf(stderr, "Error %d on select", errno);
+            fprintf(stderr, "Error %d on select.\n", errno);
             break;  // graceful close
         }
 
@@ -262,12 +264,13 @@ int main(int argc, char *argv[]) {
             //       to inbytesread directly can potentially corrupt events.
             inbytesread_next = read(inhandle, inbufferbytes_next, INBUFSIZE - inbytespartial);
             if (inbytesread_next == 0) {
+                fprintf(stderr, "Input stream closed.\n");
                 break;  // no bytes read (i.e. EOF)
                         // TODO: Check if this should be continue instead,
                         //       when running ad-infinitum
             }
             if (inbytesread_next == -1) {
-                fprintf(stderr, "Error %d on read", errno);
+                fprintf(stderr, "Error %d on input read.\n", errno);
                 break;  // graceful close
             }
 
@@ -401,7 +404,7 @@ int main(int argc, char *argv[]) {
         }
 #endif
         if (retval != eventnum * sizeof(struct rawevent)) {
-            fprintf(stderr, "Error %d on write", errno);
+            fprintf(stderr, "Error %d on write.\n", errno);
             break;  // graceful close
         }
         outevents = 0;  // clear outbuffer only after successful write
