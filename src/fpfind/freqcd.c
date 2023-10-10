@@ -58,7 +58,6 @@
    Potential improvements:
      - Allow customization of frequency correction units (using 128-bit?)
      - Consider using epoll() if necessary
-     - Add mechanism to handle out-of-order timestamps
      - Merge write procedure with select() call
      - Optimize buffer parameters
  */
@@ -205,10 +204,11 @@ int main(int argc, char *argv[]) {
     int freqbytesread = 0;
     int freqbytesread_next = 0;
     int freqbytespartial = 0;  // size of partial freqcorr value remaining
-    char *freqbuffer_next = freqbuffer;  // pointer to next char write destination
+    char *freqbuffer_next;
     if (freqhandle) {  // allocate memory only if needed
         freqbuffer = (char *)malloc(FREQBUFSIZE);
         if (!freqbuffer) return -emsg(13);
+        freqbuffer_next = freqbuffer;  // pointer to next char write destination
     }
 
     /* parameters for select call */
@@ -318,17 +318,7 @@ int main(int argc, char *argv[]) {
 
                 /* calculate timestamp correction */
                 tscorr = ((ll)((ts - tsref) >> FCORR_TBITS1) * fcorr) >> FCORR_TBITS2;
-                ts += tscorr;
-
-                /* account for 20 hour timestamp overflow condition */
-                // TODO: Need to account for the 20 hour timestamp overflow condition
-                //       which might be a bit messy due to non-monotonically increasing
-                //       timestamps as a result of say, detector timing corrections.
-                //       Consider the following corner cases:
-                //         1. If curr < prev, then prev-curr > 10 hours => overflow.
-                //            Save tsref and set to zero, overflow++.
-                //         2. If curr > prev, then curr-prev > 10 hours => underflow.
-                //            Restore previous tsref, overflow--;
+                ts += tscorr + tsoverflowcorr;
 
                 /* write corrected timestamp to output buffer */
                 eventptr->high = ts >> 22;
@@ -345,6 +335,13 @@ int main(int argc, char *argv[]) {
                 outbuffer[outevents++] = *eventptr;
                 eventptr++;
             }
+
+            /* update reference timestamp to keep within 20 hour overflow condition */
+            // TODO: Update this portion only when an overflow did not occur.
+            //       This will otherwise result in a discontinuity due to potentially
+            //       incorrect 'tscorr'.
+            tsref = ts;
+            tsoverflowcorr += tscorr;
         }
 
         // Read frequency correction values
