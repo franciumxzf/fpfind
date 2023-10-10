@@ -44,6 +44,7 @@
      -F freqfilename: Filename of frequency correction values. Needs to be
                       a readable+writeable socket storing newline-delimited
                       frequency offset values (see '-f' option for format).
+                      Takes priority over '-f' supplied offsets.
                       If unspecified, the frequency offset will be static.
 
    ENCODING OPTIONS:
@@ -201,12 +202,14 @@ int main(int argc, char *argv[]) {
     int outevents = 0;
 
     char *freqbuffer;
-    freqbuffer = (char *)malloc(FREQBUFSIZE);
-    if (!freqbuffer) return -emsg(13);
     int freqbytesread = 0;
     int freqbytesread_next = 0;
     int freqbytespartial = 0;  // size of partial freqcorr value remaining
     char *freqbuffer_next = freqbuffer;  // pointer to next char write destination
+    if (freqhandle) {  // allocate memory only if needed
+        freqbuffer = (char *)malloc(FREQBUFSIZE);
+        if (!freqbuffer) return -emsg(13);
+    }
 
     /* parameters for select call */
     fd_set rfds;
@@ -416,6 +419,6 @@ int main(int argc, char *argv[]) {
     /* free buffers */
     free(inbuffer);
     free(outbuffer);
-    free(freqbuffer);
+    if (freqfilename[0]) free(freqbuffer);
     return 0;
 }
