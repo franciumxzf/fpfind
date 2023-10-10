@@ -33,13 +33,29 @@ import pathlib
 import secrets
 import struct
 import sys
+import warnings
 
 import parse_timestamps as ts_parser
+
+warnings.simplefilter(action="once", category=UserWarning)
 
 LEGACY = False
 
 def get_event(timestamp, detectors: int = 0b0001):
-    assert isinstance(timestamp, int) and (0 <= timestamp < (1 << 54))
+    """
+
+    Timestamps are not restricted to the (1 << 54) cap, to reflect the
+    filespec of truncating the excess significant bits. Use case in
+    having user see that the timestamps have indeed overflowed, e.g. for
+    verifying overflow response. A warning will be issued for precaution.
+    """
+    assert isinstance(timestamp, int) and (0 <= timestamp)
+    if timestamp >= (1 << 54):
+        warnings.warn(
+            f"Timestamp overflow detected, "
+            "will truncate accordingly."
+        )
+        timestamp = timestamp & 0x3FFFFFFFFFFFFF
     assert isinstance(detectors, int) and (0 <= detectors < 16)
     event = (timestamp << 10) + detectors
     if LEGACY:
@@ -91,22 +107,22 @@ if __name__ == "__main__":
             HAS_TEMP_FILE = args.infile == "-"
             if HAS_TEMP_FILE:
                 inputfile = pathlib.Path(secrets.token_hex(5) + "_tempinput")
-            
+
             # Read binary timestamps from file
             try:
                 with open(inputfile, "wb") as f:
                     f.write(sys.stdin.buffer.read())
-                
+
                 # Parsing binary timestamps
                 ts, _ = ts_parser.read_a1(inputfile, args.x)
                 for t in ts:
                     print(int(t * ts_parser.TSRES.PS4.value))
-            
+
             # Clean up
             finally:
                 if HAS_TEMP_FILE:
                     inputfile.unlink()
-        
+
         # 4. Read decimal timestamps from interactive prompt,
         #    note output file in this case should be supplied.
         #    This is only for testing purposes.
