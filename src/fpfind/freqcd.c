@@ -30,7 +30,7 @@
 
    usage:
      freqcd [-i infilename] [-o outfilename] [-x]
-            [-f freqcorr]
+            [-f freqcorr] [-F freqfilename]
 
 
    DATA STREAM OPTIONS:
@@ -60,7 +60,6 @@
      - Add mechanism to handle out-of-order timestamps
      - Merge write procedure with select() call
      - Optimize buffer parameters
-     - Possible dynamic loading of freqcorr while freqcd is still running?
  */
 
 #include <stdio.h>
@@ -69,6 +68,7 @@
 #include <sys/select.h> // fd_set, usually implicitly declared
 #include <unistd.h>  // getopt, select
 #include <errno.h>   // select errno
+#include <limits.h>  // INT_MAX
 
 /* default definitions */
 #define FNAMELENGTH 200            /* length of file name buffers */
@@ -76,6 +76,7 @@
 #define FILE_PERMISSONS 0644       /* for all output files */
 #define INBUFENTRIES 1024          /* max. elements in input buffer */
 #define OUTBUFENTRIES 1024         /* max. elements in output buffer */
+#define FREQBUFSIZE 100            /* max. length of frequency correction values */
 #define RETRYREADWAIT 500000       /* sleep time in usec after an empty read */
 #define FCORR_ARESBITS -34         /* absolute resolution of correction, in power of 2 */
 #define FCORR_AMAXBITS -13         /* absolute maximum allowed correction, in power of 2 */
@@ -105,11 +106,25 @@ char *errormessage[] = {
     "Error opening output stream",
     "Error reading in freqfilename", /* 10 */
     "Error opening freq correction stream source",
+    "Freq correction value not newline terminated",
+    "Unable to allocate memory to freqbuffer",
 };
 int emsg(int code) {
     fprintf(stderr, "%s\n", errormessage[code]);
     return code;
 };
+
+/* for reading freqcorr values */
+int readint(char *buff) {
+    char *end;
+    long value;
+    value = strtol(buff, &end, 10);
+    // string is a decimal, zero-terminated, and fits in an int
+    if ((end != buff) && (*end == 0) && (abs(value) < INT_MAX))
+        return (int)value;
+    return INT_MAX;
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -184,6 +199,14 @@ int main(int argc, char *argv[]) {
     outbuffer = (struct rawevent *)malloc(OUTBUFSIZE);
     if (!outbuffer) return -emsg(7);
     int outevents = 0;
+
+    char *freqbuffer;
+    freqbuffer = (char *)malloc(FREQBUFSIZE);
+    if (!freqbuffer) return -emsg(13);
+    int freqbytesread = 0;
+    int freqbytesread_next = 0;
+    int freqbytespartial = 0;  // size of partial freqcorr value remaining
+    char *freqbuffer_next = freqbuffer;  // pointer to next char write destination
 
     /* parameters for select call */
     fd_set rfds;
@@ -318,6 +341,55 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Read frequency correction values
+        // - Note partial buffer must be maintained, since there is no other
+        //   check to verify integrity of values broken up between separate reads.
+        // - Note also this falls after reading the input buffer, but there is no
+        //   particular reason why this order is chosen.
+        if (freqhandle && FD_ISSET(freqhandle, &rfds)) {
+            freqbytesread_next = read(freqhandle, freqbuffer_next, FREQBUFSIZE - freqbytespartial - 1);
+
+            // File/pipe closed -> proceed without any further fcorr updates
+            if (freqbytesread_next == 0) {
+                freqhandle = 0;
+#ifdef __DEBUG__
+                fprintf(stderr, "[debug] File/pipe '%s' closed.\n", freqfilename);
+                // hidden in buffer to avoid debug leak
+                // no break here
+#endif
+            }
+            if (freqbytesread_next == -1) {
+                fprintf(stderr, "Error %d on freqhandle read.\n", errno);
+                break;
+            }
+
+            /* concatenate new data */
+            freqbytesread = freqbytespartial + freqbytesread_next;
+
+            /* search for valid fcorr values */
+            int next_num_idx = 0, fcorr_tmp;
+            for (i = 0; i < freqbytesread; i++) {
+                if (freqbuffer[i] == '\n') {
+                    freqbuffer[i] = 0;  // zero-terminate for readint
+                    fcorr_tmp = readint(&freqbuffer[next_num_idx]);
+                    if (abs(fcorr_tmp) < FCORR_MAX) fcorr = fcorr_tmp;
+#ifdef __DEBUG__
+                    fprintf(stderr, "[debug] 'fcorr' updated to '%d'.\n", fcorr);
+#endif
+                    next_num_idx = i+1;  // continue reading
+                }
+            }
+
+            /* clear parsed numbers from freqbuffer */
+            if (next_num_idx > 0) {
+                freqbytespartial = freqbytesread - next_num_idx;
+                for (i = freqbytesread - freqbytespartial, j = 0; j < freqbytespartial; i++, j++) {
+                    freqbuffer[j] = freqbuffer[i];
+                }
+                freqbuffer_next = &freqbuffer[freqbytespartial];
+            }
+        }
+
         // TODO: Shift this back to select call to write only when pipe available,
         //   and increase buffer size of output pipe in case write unavailable.
         //   By same measure, do not flush only when output buffer is full.
@@ -341,5 +413,6 @@ int main(int argc, char *argv[]) {
     /* free buffers */
     free(inbuffer);
     free(outbuffer);
+    free(freqbuffer);
     return 0;
 }
