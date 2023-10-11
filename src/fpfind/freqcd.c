@@ -226,7 +226,7 @@ int main(int argc, char *argv[]) {
     ull tsref = 0;  // reference timestamp to scale by frequency correction,
                     // noting subsequent initializations should zero 'tsref'
     int isset_tsref = 0;    // initialization marker for tsref
-    ull ts;                 // timestamp
+    ull ts, tsmeas;         // timestamp
     ll tscorr;              // timestamp correction
     ll tsoverflowcorr = 0;  // timestamp overflow corrections
     unsigned int high;      // high word in timestamp
@@ -310,20 +310,18 @@ int main(int argc, char *argv[]) {
                     low = high;
                     high = _swp;
                 }
-                ts = ((ull)high << 22) | (low >> 10);
-#ifdef __DEBUG__
-                fprintf(stderr, "[debug] Raw event - %08x %08x\n", high, low);
-                fprintf(stderr, "[debug] |   t_i: %014llx (%020llu)\n", ts, ts);
-#endif
+                tsmeas = ((ull)high << 22) | (low >> 10);
 
                 /* calculate timestamp correction */
-                tscorr = ((ll)((ts - tsref) >> FCORR_TBITS1) * fcorr) >> FCORR_TBITS2;
-                ts += tscorr + tsoverflowcorr;
+                tscorr = ((ll)((tsmeas - tsref) >> FCORR_TBITS1) * fcorr) >> FCORR_TBITS2;
+                ts = tsmeas + tscorr + tsoverflowcorr;
 
                 /* write corrected timestamp to output buffer */
                 eventptr->high = ts >> 22;
                 eventptr->low = (ts << 10) | (low & 0x3ff);
 #ifdef __DEBUG__
+                fprintf(stderr, "[debug] Raw event - %08x %08x\n", high, low);
+                fprintf(stderr, "[debug] |   t_i: %014llx (%020llu)\n", tsmeas, tsmeas);
                 fprintf(stderr, "[debug] |  t'_i: %014llx (%020llu)\n", ts, ts);
                 fprintf(stderr, "[debug] +---------- %08x %08x\n", eventptr->high, eventptr->low);
 #endif
@@ -337,10 +335,7 @@ int main(int argc, char *argv[]) {
             }
 
             /* update reference timestamp to keep within 20 hour overflow condition */
-            // TODO: Update this portion only when an overflow did not occur.
-            //       This will otherwise result in a discontinuity due to potentially
-            //       incorrect 'tscorr'.
-            tsref = ts;
+            tsref = tsmeas;
             tsoverflowcorr += tscorr;
         }
 
