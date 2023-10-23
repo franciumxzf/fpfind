@@ -44,6 +44,13 @@ class HeadT3(NamedTuple):
     length_entry: int
     bits_per_entry: int
 
+class HeadT4(NamedTuple):
+    tag: int
+    epoch: int
+    length: int
+    timeorder: int
+    base_bits: int
+
 
 # Header readers
 # Extracted from ref [2]
@@ -81,12 +88,23 @@ def read_T3_header(file_name: str):
         logger.warning(f'Epoch in header {headt3.epoch} does not match epoc filename {file_name}')
     return headt3
 
+def read_T4_header(file_name: str):
+    file_name = str(file_name)
+    with open(file_name, 'rb') as f:
+        head_info = f.read(4*5)
+    headt4 = HeadT4._make(unpack('IIIII', head_info))
+    if (headt4.tag != 0x104 and headt4.tag != 4) :
+        logger.warning(f'{file_name} is not a Type4 header file')
+    if hex(headt4.epoch) != ('0x' + file_name.split('/')[-1]):
+        logger.warning(f'Epoch in header {headt4.epoch} does not match epoc filename {file_name}')
+    return headt4
+
 
 # Epoch utility functions
 
 def date2epoch(datetime=None):
     """Returns current epoch number as hex.
-    
+
     Epochs are in units of 2^32 * 125e-12 == 0.53687 seconds.
 
     Args:
@@ -94,7 +112,7 @@ def date2epoch(datetime=None):
     """
     if datetime is None:
         datetime = dt.datetime.now()
-    
+
     total_seconds = int(datetime.timestamp())
     epoch_val = int(total_seconds/125e-12) >> 32
     return f"{epoch_val:08x}"
@@ -102,7 +120,7 @@ def date2epoch(datetime=None):
 
 def epoch2date(epoch):
     """Returns datetime object corresponding to epoch.
-    
+
     Epoch must be in hex format, e.g. "ba1f36c0".
 
     Args:
@@ -128,13 +146,13 @@ def read_T1(
         fractional: bool = True,
     ):
     """Returns timestamp and detector information from T1 files.
-    
+
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
 
     By default, the function returns timestamps in units of 1ns with as
     high a resolution as possible (i.e. including fractional values).
-    
+
     TODO
 
     'full' is False by default, which indicates only the raw-timestamp
@@ -150,7 +168,7 @@ def read_T1(
     53-bit precision (insufficient resolution).
 
     If 'raw' is True, timestamps are stored in units of 4ps instead of 1ns.
-    
+
     Raises:
         ValueError: Number of epochs does not match length in header.
     """
@@ -172,7 +190,7 @@ def read_T1(
             value = \
                 (int.from_bytes(event_high, byteorder="little") << 32) \
                 + int.from_bytes(event_low, byteorder="little")
-            
+
             if value == 0:
                 break  # termination
 
@@ -182,20 +200,20 @@ def read_T1(
 
             base = value & 0b1111
             bases.append(base)
-    
+
     # Validity checks
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
-    
+
     # Add epoch if required, at most 32-17 = 15 bits
     epoch_msb = header.epoch >> 17
-    
+
     # Right now in units of 4ps
     # Check if need to store floating point
     if fractional:
         # Convert to desired resolution
         timestamps = np.array(timestamps, dtype=np.float128)
-        timestamps = timestamps / (TSRES.PS4.value/resolution.value) 
+        timestamps = timestamps / (TSRES.PS4.value/resolution.value)
         epoch_msb = np.float128(epoch_msb << 54)
         epoch_msb = epoch_msb / (TSRES.PS4.value/resolution.value)
 
@@ -203,7 +221,7 @@ def read_T1(
     elif resolution in (TSRES.PS4,) and full_epoch:
         timestamps = np.array(timestamps, dtype=object)
         epoch_msb = int(epoch_msb) << 54
-    
+
     # Everything of resolution 125 ps and larger can fit
     # in 64-bit unsigned integer, i.e. PS125, NS1.
     else:
@@ -215,19 +233,19 @@ def read_T1(
     # Add epoch
     if full_epoch:
         timestamps += epoch_msb
-    
+
     return timestamps, np.array(bases)
 
 
 def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
     """Return 'msb_size'-bits from MSB of buffer, and the rest.
-    
+
     If insufficient bits to load value, data is automatically loaded
     from file 'fileobject' provided (must be already open in "rb" mode).
 
     Raises:
         ValueError: msb_size > size but fileobject not provided.
-    
+
     Example:
 
         >>> msb_size = 4
@@ -249,7 +267,7 @@ def extract_bits(msb_size: int, buffer: int, size: int, fileobject=None):
         buffer <<= 32
         buffer += int.from_bytes(fileobject.read(4), byteorder="little")
         size += 32
-    
+
     # Extract MSB from buffer
     msb = buffer >> (size - msb_size)
     buffer &= (1 << (size - msb_size)) - 1
@@ -265,7 +283,7 @@ def read_T2(
         fractional: bool = True,
     ):
     """Returns timestamp and detector information from T2 files.
-    
+
     Timestamp and detector information follow the formats specified in
     'parse_timestamps' module, for interoperability.
 
@@ -327,20 +345,20 @@ def read_T2(
             logging.debug("Extracting base...")
             base, buffer, size = extract_bits(basebits, buffer, size, f)
             bases.append(base)
-    
+
     # Validity checks
     if length and len(timestamps) != length:
         raise ValueError("Number of epochs do not match length specified in header")
-    
+
     # Add full epoch if required
     epoch_msb = header.epoch >> 17
-    
+
     # Right now in units of 125ps
     # Check if need to store floating point
     if fractional:
         # Convert to desired resolution
         timestamps = np.array(timestamps, dtype=np.float128)
-        timestamps = timestamps / (TSRES.PS125.value/resolution.value) 
+        timestamps = timestamps / (TSRES.PS125.value/resolution.value)
         epoch_msb = np.float128(epoch_msb << 49)
         epoch_msb = epoch_msb / (TSRES.PS125.value/resolution.value)
 
@@ -351,7 +369,7 @@ def read_T2(
         timestamps = np.array(timestamps, dtype=object)
         timestamps = timestamps << bitdiff
         epoch_msb = int(epoch_msb) << (49+bitdiff)
-    
+
     # Everything of resolution 125 ps and larger can fit
     # in 64-bit unsigned integer, i.e. PS125, NS1.
     else:
@@ -373,13 +391,13 @@ def write_T1(directory, full_epoch, timestamps, detectors):
 
     directory = pathlib.Path(directory)
     target = directory / f"{full_epoch:x}"
-    
+
     # Broadcast detectors if single value given
     if np.array(detectors).ndim == 0:
         detectors = np.ones(len(timestamps)) * detectors
     elif len(detectors) != len(timestamps):
         raise ValueError("Lengths of timestamps and detectors must match")
-    
+
     with open(target, "wb") as f:
         header = pack("iIIii", 0x101, full_epoch, len(timestamps), 49, 4)
         f.write(header)
@@ -393,7 +411,7 @@ def write_T1(directory, full_epoch, timestamps, detectors):
 
             # Write high word, then low word
             f.write(pack("<II", event >> 32, event & 0xffff_ffff))
-        
+
         # Termination
         f.write(pack("II", 0, 0))
 
@@ -421,16 +439,16 @@ class ServiceT3:
 
 def read_T3(file_name: str) -> ServiceT3:
     """Used to process rawkey files.
-            
+
     Example data:
     01000001_00100101_00100010_00010100
       \\    \\
      alice  bob
      0100   0001
-    
+
     Note:
         Unpacking was done wrongly in original diagnosis.c code.
-        
+
         Functionally the same as 'service_T3' in QKDServer.utils, with
         some syntatic comments.
     """
@@ -438,7 +456,7 @@ def read_T3(file_name: str) -> ServiceT3:
     # with multi-bit detections set to -1
     decode = [-1, 0, 1, -1, 2, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1]
     er_coinc_id = [0, 5, 10, 15]  # VV, AA, HH, DD
-    gd_coinc_id = [2, 7, 8, 13]   # VH, AD, HV, DA 
+    gd_coinc_id = [2, 7, 8, 13]   # VH, AD, HV, DA
     detections = []  # store detection events of pairs
     headt3 = read_T3_header(file_name)
     service = ServiceT3(headt3)
@@ -462,11 +480,11 @@ def read_T3(file_name: str) -> ServiceT3:
             data, = unpack("<I", word)  # comma for unpacking tuple result
             data_b = data.to_bytes(4, byteorder="big")
             detections.extend(data_b)
-    
+
     # Verify detections match length entry in header, ignoring \x00 byte padding
     if headt3.length_entry != len(detections) - data_b.count(0):
         logger.error(f"Stream 3 size inconsistency: length of entry does not match.")
-    
+
     # Assign to coincidence matrix
     for i in range(headt3.length_entry):
         detection = detections[i]
@@ -488,3 +506,67 @@ def read_T3(file_name: str) -> ServiceT3:
         service.qber = float(round(er_coin / (er_coin + gd_coin), 3))  # ignore garbage
 
     return service
+
+def read_T4(filename: str):
+    """Returns timestamp indices and detector information from T4 files.
+
+    Timestamp and detector information follow the formats specified in
+    'parse_timestamps' module, for interoperability.
+
+    Raises:
+        ValueError: Length and termination bits inconsistent with filespec.
+    """
+
+    # Header details
+    header = read_T4_header(filename)
+    timeorder = header.timeorder
+    timeorder_extended = 32
+    basebits = header.base_bits
+    length = header.length
+
+    # Accumulators
+    indices = []
+    bases = []
+    time_index = 0
+    buffer = 0
+    size = 0  # number of bits in buffer
+    with open(filename, "rb") as f:
+        f.read(20)  # remove header
+        while True:
+
+            # Read timing information
+            logging.debug("Extracting timing...")
+            time_dindex, buffer, size = \
+                extract_bits(timeorder, buffer, size, f)
+
+            # End-of-file check
+            if time_dindex == 1:
+                base, buffer, size = extract_bits(basebits, buffer, size, f)
+                if base != 0:
+                    raise ValueError(
+                        "File inconsistent with T4 epoch definition: "
+                        "Terminal base bits not zero"
+                    )
+                break
+
+            # Check if timing is actually in extended format, i.e. 32-bits
+            if time_dindex == 0:
+                logging.debug("Extracting extended timing...")
+                time_dindex, buffer, size = \
+                    extract_bits(timeorder_extended, buffer, size, f)
+
+            # Index retrieved, normalize
+            time_index += time_dindex - 2
+            indices.append(time_index)
+
+            # Extract detector pattern, but not important here
+            # Note we are guaranteed (timeorder+basebits < 32)
+            logging.debug("Extracting base...")
+            base, buffer, size = extract_bits(basebits, buffer, size, f)
+            bases.append(base)
+
+    # Validity checks
+    if length and len(indices) != length:
+        raise ValueError("Number of epochs do not match length specified in header")
+
+    return np.array(indices), np.array(bases)
