@@ -196,7 +196,7 @@ def sread_a1(
                 t = _format_timestamps(t, resolution, fractional)
                 p = data[:, low_pos] & 0xF
                 yield t, p
-    
+
     size = pathlib.Path(filename).stat().st_size
     num_batches = int(((size-1) // (buffer_size*8)) + 1)
     return _sread_a1(), num_batches
@@ -295,7 +295,7 @@ def _consolidate_events(t: list, p: list, resolution: TSRES = TSRES.NS1, sort: b
         p: Detector pattern array.
         resolution: Resolution of timestamps in timestamp array.
         sort: If events should be further sorted in chronological order.
-    
+
     Note:
         float128 is needed, since float64 only encodes 53-bits of precision,
         while the high resolution timestamp has 54-bits precision.
@@ -407,7 +407,7 @@ def swrite_a2(
 
 def print_statistics(filename: str, t: list, p: list):
     """Prints statistics using timestamp event readers.
-    
+
     Note:
         Maintained only for legacy reasons to support older
         reading mechanisms, e.g. 'read_a0'.
@@ -456,7 +456,7 @@ def print_statistics_stream(
         count_mp += count(np.isin(p, (0, 1, 2, 4, 8), invert=True))
         count_np += count(p == 0)
         set_p.update(np.unique(p))
-        
+
         # Store timing only if timestamps not filtered out
         if len(t) != 0:
             if first_t is None:
@@ -491,7 +491,7 @@ def print_statistics_report(
         patterns: Optional[list] = None,
     ):
     """Prints the statistics report.
-    
+
     All optional fields must be present if 'num_events' > 0.
     """
 
@@ -530,11 +530,11 @@ def get_pattern_mask(
         invert: bool = False,
     ) -> Tuple[list, list]:
     """Returns a mask with bits set where patterns match, as well as result.
-    
+
     The function behaves differently when the pattern is either used as
     a fixed pattern (when 'mask' is False), or as a bitmask (when 'mask'
     is True).
-    
+
     When 'mask' is False, pattern matching with select events whose detector
     patterns match the exact pattern. Inverting with 'invert' as False will
     remove these events instead (i.e. pattern blacklist).
@@ -568,13 +568,13 @@ def get_pattern_mask(
         >>> mask4, p4 = get_pattern_mask(p, 0b0101, True, True)
         >>> list(t[mask4]) == [0,2,3,6,7,8] and list(p4) == [0,2,2,2,2,8]
         True
-    
+
     Note:
         The function is designed to return a bitmask instead of directly
         filtering the timestamps, to allow subsequent post-processing based
         on the bitmask, e.g. inverting the returned bitmask, or mark patterns.
     """
-    
+
     # Fixed pattern
     if not mask:
         pmask = (p == pattern)
@@ -595,7 +595,7 @@ def get_pattern_mask(
         pmask = (_p != 0)
         masked = _p[pmask]  # return detector patterns after masking
         masked = np.where(masked == 16, 0, masked)  # recover dummy events
-    
+
     return pmask, masked
 
 def get_timing_mask(
@@ -605,7 +605,7 @@ def get_timing_mask(
         resolution: TSRES = TSRES.NS1,
     ) -> list:
     """Returns a mask where timestamps are bounded between start and end.
-    
+
     The timing array is already assumed to be sorted, as part of the timestamp
     filespec. If 'start' or 'end' is None, the range is assumed unbounded in respective direction.
     Start and end time are in seconds (not ns since typical usecase as rough filter anyway).
@@ -653,7 +653,7 @@ def get_timing_mask(
     mask = np.zeros(len(t), dtype=bool)
     if len(t) == 0:
         return mask
-    
+
     # Parse start argument
     if start is None:
         start = t[0]
@@ -663,7 +663,7 @@ def get_timing_mask(
         i = bisect.bisect_left(t, start)  # binary search
     if start > t[-1]:
         return mask
-    
+
     # Parse end argument
     if end is None:
         end = t[-1]
@@ -683,7 +683,7 @@ def get_timing_mask(
 #  MAIN  #
 ##########
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Converts between different timestamp7 formats")
     parser.add_argument("-A", choices=["0","1","2"], required=True, help="Input timestamp format")
     parser.add_argument("-X", action="store_true", help="Use legacy input format")
@@ -698,74 +698,79 @@ if __name__ == "__main__":
     parser.add_argument("--pfilter-invert", action="store_true", help="Pattern filtering: set invert option")
     parser.add_argument("--tfilter-start", type=float, help="Time filtering: start timestamp, in seconds")
     parser.add_argument("--tfilter-end", type=float, help="Time filtering: end timestamp, in seconds")
-    
+
     # Support for older read-write mechanisms, i.e. disable batch streaming
     parser.add_argument("--inmemory", action="store_true", help="Disable batch streaming (retained for legacy reasons)")
 
     parser.add_argument("infile", help="Input timestamp file")
     parser.add_argument("outfile", nargs="?", const="", help="Output timestamp file")
 
-    # Do script only if arguments supplied
-    # otherwise run as a normal script (for interactive mode)
-    if len(sys.argv) > 1:
-        args = parser.parse_args()
+    # Print help if no arguments supplied
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
 
-        # Check outfile supplied if '-p' not supplied
-        if not args.print and not args.outfile:
-            raise ValueError("destination filepath must be supplied.")
+    args = parser.parse_args()
 
-        read = [read_a0, read_a1, read_a2][int(args.A)]
-        sread = [sread_a0, sread_a1, sread_a2][int(args.A)]
-        write = [write_a0, write_a1, write_a2][int(args.a)]
-        swrite = [swrite_a0, swrite_a1, swrite_a2][int(args.a)]
+    # Check outfile supplied if '-p' not supplied
+    if not args.print and not args.outfile:
+        raise ValueError("destination filepath must be supplied.")
 
-        # Check file size
-        filepath = pathlib.Path(args.infile)
-        if not filepath.is_file():
-            raise ValueError(f"'{args.infile}' is not a file.")
+    read = [read_a0, read_a1, read_a2][int(args.A)]
+    sread = [sread_a0, sread_a1, sread_a2][int(args.A)]
+    write = [write_a0, write_a1, write_a2][int(args.a)]
+    swrite = [swrite_a0, swrite_a1, swrite_a2][int(args.a)]
 
-        # Define filter function for event and event stream
-        has_filtering = \
-            (args.pfilter_pattern is not None) \
-            or (args.tfilter_start is not None) \
-            or (args.tfilter_end is not None)
-        
-        def event_filter(t, p, resolution: TSRES = TSRES.NS1):
-            if args.pfilter_pattern is not None:
-                mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
-                t = t[mask]
-            if args.tfilter_start is not None or args.tfilter_end is not None:
-                mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end, resolution)
-                t = t[mask]
-                p = p[mask]
-            return t, p
+    # Check file size
+    filepath = pathlib.Path(args.infile)
+    if not filepath.is_file():
+        raise ValueError(f"'{args.infile}' is not a file.")
 
-        def inline_filter(stream, resolution: TSRES = TSRES.NS1):
-            for t, p in stream:
-                yield event_filter(t, p, resolution)
-        
-        # Use legacy read-write mechanisms
-        if args.inmemory:
-            t, p = read(filepath, args.X)
-            t, p = event_filter(t, p)
-            if args.print:
-                print_statistics(filepath, t, p)
-            else:
-                write(args.outfile, t, p, args.x)
+    # Define filter function for event and event stream
+    has_filtering = \
+        (args.pfilter_pattern is not None) \
+        or (args.tfilter_start is not None) \
+        or (args.tfilter_end is not None)
 
-        # Check if printing stream first
-        elif args.print:
-            if has_filtering:
-                stream, num_batches = sread(filepath, args.X)  # default 1ns floating-point resolution
-                stream = inline_filter(stream)
-                print_statistics_stream(filepath, stream, num_batches, display=(not args.quiet))
-            else:
-                # Disable timestamp formatting to speed up reads
-                stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
-                print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.PS4, display=(not args.quiet))
+    def event_filter(t, p, resolution: TSRES = TSRES.NS1):
+        if args.pfilter_pattern is not None:
+            mask, p = get_pattern_mask(p, args.pfilter_pattern, args.pfilter_mask, args.pfilter_invert)
+            t = t[mask]
+        if args.tfilter_start is not None or args.tfilter_end is not None:
+            mask = get_timing_mask(t, args.tfilter_start, args.tfilter_end, resolution)
+            t = t[mask]
+            p = p[mask]
+        return t, p
 
-        # Write out
+    def inline_filter(stream, resolution: TSRES = TSRES.NS1):
+        for t, p in stream:
+            yield event_filter(t, p, resolution)
+
+    # Use legacy read-write mechanisms
+    if args.inmemory:
+        t, p = read(filepath, args.X)
+        t, p = event_filter(t, p)
+        if args.print:
+            print_statistics(filepath, t, p)
         else:
+            write(args.outfile, t, p, args.x)
+
+    # Check if printing stream first
+    elif args.print:
+        if has_filtering:
+            stream, num_batches = sread(filepath, args.X)  # default 1ns floating-point resolution
+            stream = inline_filter(stream)
+            print_statistics_stream(filepath, stream, num_batches, display=(not args.quiet))
+        else:
+            # Disable timestamp formatting to speed up reads
             stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
-            stream = inline_filter(stream, TSRES.PS4)
-            swrite(args.outfile, stream, num_batches, args.x, resolution=TSRES.PS4, display=(not args.quiet))
+            print_statistics_stream(filepath, stream, num_batches, resolution=TSRES.PS4, display=(not args.quiet))
+
+    # Write out
+    else:
+        stream, num_batches = sread(filepath, args.X, TSRES.PS4, False)
+        stream = inline_filter(stream, TSRES.PS4)
+        swrite(args.outfile, stream, num_batches, args.x, resolution=TSRES.PS4, display=(not args.quiet))
+
+if __name__ == "__main__":
+    main()
