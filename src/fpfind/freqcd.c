@@ -53,13 +53,20 @@
                       timestamp unit.
      -f freqcorr:     Frequency offset of the current clock relative to some
                       reference clock, in units of 2^-34 (or 0.6e-10).
-                      If unspecified, offset = 0.
+                      If unspecified, offset = 0. Maximum absolute value is
+                      2097151 (i.e. 2^21-1), see [1] for explanation.
+     -d:              Decimal mode. Changes the frequency offset read by '-f'
+                      to be in units of 0.1 ppb instead, with maximum absolute
+                      value of 1220703 (i.e. 2^-13). For human-readability.
 
    Potential improvements:
      - Allow customization of frequency correction units (using 128-bit?)
      - Consider using epoll() if necessary
      - Merge write procedure with select() call
      - Optimize buffer parameters
+
+   References:
+     [1]: Formulae, https://github.com/franciumxzf/fpfind/issues/6
  */
 
 #include <stdio.h>
@@ -69,6 +76,7 @@
 #include <unistd.h>  // getopt, select
 #include <errno.h>   // select errno
 #include <limits.h>  // INT_MAX
+#include <math.h>    // pow(..., 10)
 
 /* default definitions */
 #define FNAMELENGTH 200            /* length of file name buffers */
@@ -81,6 +89,7 @@
 #define FCORR_ARESBITS -34         /* absolute resolution of correction, in power of 2 */
 #define FCORR_AMAXBITS -13         /* absolute maximum allowed correction, in power of 2 */
 #define FCORR_DEFAULT 0            /* frequency correction in units of 2^FCORR_ARESBITS */
+#define FCORR_ARESDECIMAL -10      /* absolute resolution of correction, in power of 10, specifically for '-d' mode */
 //#define __DEBUG__                /* global debug flag, uncomment to disable */
 
 // struct defined in non-legacy format
@@ -135,15 +144,20 @@ int main(int argc, char *argv[]) {
     const int FCORR_TBITS1 = -FCORR_AMAXBITS - 1;  // bit truncations when correcting timestamp
     const int FCORR_TBITS2 = (FCORR_AMAXBITS - FCORR_ARESBITS) + 1;
 
+    // Conversion factor for decimal mode, i.e. 1e-10/2^-34 = ~1.7179869
+    // Ratio inverted due to negative signs in exponents.
+    const double FCORR_DTOB = ((long long)1 << -FCORR_ARESBITS) / pow(10, -FCORR_ARESDECIMAL);
+
     /* parse options */
     int fcorr = FCORR_DEFAULT;  // frequency correction value
     char infilename[FNAMELENGTH] = {};  // store filename
     char outfilename[FNAMELENGTH] = {};  // store filename
     char freqfilename[FNAMELENGTH] = {};  // store filename
     int islegacy = 0;  // mark if format is legacy
+    int isdecimal = 0;  // mark if frequency input is in decimal units
     int opt;  // for getopt options
     opterr = 0;  // be quiet when no options supplied
-    while ((opt = getopt(argc, argv, "i:o:F:f::x")) != EOF) {
+    while ((opt = getopt(argc, argv, "i:o:F:f:xd")) != EOF) {
         switch (opt) {
         case 'i':
             if (sscanf(optarg, FNAMEFORMAT, infilename) != 1) return -emsg(2);
@@ -159,13 +173,20 @@ int main(int argc, char *argv[]) {
             break;
         case 'f':
             if (sscanf(optarg, "%d", &fcorr) != 1) return -emsg(4);
-            if (abs(fcorr) >= FCORR_MAX) return -emsg(5);
             break;
         case 'x':
             islegacy = 1;
             break;
+        case 'd':
+            isdecimal = 1;
+            break;
         }
     }
+
+    /* check specified frequency correction is within-bounds */
+    // needs to be done after argument reading for position-agnostic '-f'
+    if (isdecimal) fcorr = (int) fcorr * FCORR_DTOB;
+    if (abs(fcorr) >= FCORR_MAX) return -emsg(5);
 
     /* set input and output handler */
     int inhandle = 0;  // stdin by default
