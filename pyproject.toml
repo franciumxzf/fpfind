@@ -15,7 +15,6 @@ tqdm = "^4.65.0"
 
 [tool.poetry.scripts]
 # Poetry 1.2.0a1 required for script file reference
-fpfind_postinstall = {reference = "scripts/fpfind_postinstall", type = "file"}
 freqcd = {reference = "src/fpfind/freqcd", type = "file"}
 fpfind = "fpfind.main:main"
 parse_timestamps = "fpfind.lib.parse_timestamps:main"

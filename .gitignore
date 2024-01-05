@@ -2,6 +2,7 @@
 code/data
 data
 data_win
+src/fpfind/freqcd_path
 
 # Compiled C files
 src/fpfind/freqcd

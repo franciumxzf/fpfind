@@ -2,11 +2,15 @@
 
 ## Usage
 
-Install the library, and run the post-installation script (which will compile `freqcd.c`, requires `gcc`).
+Requirements:
+
+* Python 3.8 and above, running in Linux
+* `gcc`, if running `freqcd` (preferably in PATH for auto-compilation)
+
+Install the library:
 
 ```bash
 pip3 install git+https://github.com/franciumxzf/fpfind.git
-fpfind_postinstall
 ```
 
 Binaries and scripts will be exposed to the path; commonly used scripts are listed below.

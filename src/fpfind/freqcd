@@ -1,0 +1,81 @@
+#!/bin/sh
+# Stand-in script for the 'freqcd' binary. Do not modify.
+#
+# This stub is required for compliance with pyproject.toml specification,
+# when the 'freqcd' binary has not yet been compiled. For convenience,
+# this script will automatically trigger the compilation and then proceed
+# to run the desired binary :)
+#
+# Works only on Linux, with 'ps', 'awk' and 'python3' dependencies.
+
+# Gets the full call to current script, then retrieves program path
+# e.g. /bin/sh /home/justin/.pyenv/versions/3.10.6/bin/freqcd -x ...
+PROGRAM=$(ps -q $$ -o args= | awk -F ' ' '{print $2}')
+
+# Get root directory of installed library, where postinstall script is located
+ENTRYPOINT=$(python3 -c "import importlib; print(importlib.util.find_spec('fpfind').origin)")
+INSTALL_ROOT=$(dirname "$(readlink -f ${ENTRYPOINT})")
+
+# Keep a record of program path, in case one desires a manual recompilation;
+# will be created in-situ only in an editable installation.
+rm -f ${INSTALL_ROOT}/freqcd_path \
+    && echo "${PROGRAM}" > ${INSTALL_ROOT}/freqcd_path
+
+# Trigger post-install compilation and write directly to target
+cd ${INSTALL_ROOT} && ./_postinstall ${PROGRAM} \
+    || { echo "'freqcd.c' failed to compile... not running."; exit 1; }
+
+# Pass arguments and directly execute
+exec "${PROGRAM}" "$@"
+
+
+
+# Explanation of this script as follows.
+#
+# We go through this trouble of adding console scripts via the build backend
+# is so that the backend can manage its installation/uninstallation, as
+# opposed to manual aliases/symlinks.
+#
+# Some issues need to be addressed before this will work:
+#   1. The use of 'pyenv' for Python management causes the binaries
+#      to be called as a shim, i.e. the call occurs within a nested script
+#      that first sources the Python environment dynamically. The actual
+#      binary location needs to be identified.
+#   2. The binaries, during the library installation process, are copied
+#      over from the repo directly, and is not a soft link. The binary
+#      itself will thus need to be replaced.
+#
+# Using the 'importlib' mechanism, i.e.
+#
+#    import importlib; print(importlib.util.find_spec('fpfind').origin)
+#
+# does not work when the library is installed as an editable package,
+# although it does work otherwise. The same applies to the pip discovery
+# method, with the additional 'pip' dependency, i.e.
+#
+#    python3 -m pip show ${LIBNAME} | grep 'Location' | awk -F ': ' '{print $2}'
+#
+# Instead, we rely on the fact that this script will be triggered by 'sh',
+# with the desired path supplied as an argument. Extracting the path is thus
+# a simple matter of a 'ps' + 'awk' hack.
+#
+# A small side-note, use of '$PPID' to extract the parent path will not work,
+# which may end up deferring to the shell emulator's process instead.
+#
+# Soft links could have been used instead of directly copying the binary,
+# so that editable installations can still freely recompile, independently
+# of the Python library install flow. However, Git will continue to track
+# this file (potentially leading to accidental binary commits), and requiring
+# users to run 'git-skip-worktree' manually is not ideal. A security concern
+# may also arise when the editable installation is publicly modifiable.
+#
+# We instead the binary directly. To accomodate the need for updates, the
+# path to the binary is provided during the compilation process, at:
+#
+#    'src/fpfind/freqcd_path'
+#
+# To use the soft link behaviour (at your risk), replace the code with:
+#
+#    cd ${INSTALL_ROOT} && ./_postinstall ${INSTALL_ROOT}/freqcd \
+#        || { echo "'freqcd.c' failed to compile... not running."; exit 1; }
+#    rm -f ${PROGRAM} && ln -s ${INSTALL_ROOT}/freqcd ${PROGRAM}

@@ -1,0 +1,4 @@
+#!/bin/sh
+TARGET=freqcd
+if [ ! -z "$1" ]; then TARGET="$1"; fi
+gcc -o ${TARGET} freqcd.c lib/getopt.c
