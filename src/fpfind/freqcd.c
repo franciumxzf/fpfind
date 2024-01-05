@@ -139,7 +139,6 @@ void usage() {
 Usage: freqcd [-i infilename] [-o outfilename] [-x]\n\
               [-f freqcorr] [-F freqfilename] [-d]\n\
 Performs frequency correction of timestamps emitted by qcrypto's readevents.\n\
-Shows this help with '-h' option.\n\
 \n\
 Data stream options:\n\
   -i infilename    File/socket name for source events. Defaults to stdin.\n\
@@ -149,9 +148,9 @@ Data stream options:\n\
 Encoding options:\n\
   -x               Use legacy timestamp format.\n\
   -f freqcorr      Frequency offset, in units of 2^-34 (range: 0-2097151).\n\
-  -d               Use units of 0.1ppb for '-f' (range: 0-1220703).\n\
+  -d               Use units of 0.1ppb for '-f'        (range: 0-1220703).\n\
 \n\
-More descriptive documentation:\n\
+Shows this help with '-h' option. More descriptive documentation:\n\
 <https://github.com/franciumxzf/fpfind/blob/main/src/fpfind/freqcd.c>\n\
 ");
 }
