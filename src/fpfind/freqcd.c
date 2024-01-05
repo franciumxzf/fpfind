@@ -30,7 +30,7 @@
 
    usage:
      freqcd [-i infilename] [-o outfilename] [-x]
-            [-f freqcorr] [-F freqfilename]
+            [-f freqcorr] [-F freqfilename] [-d]
 
 
    DATA STREAM OPTIONS:
@@ -134,6 +134,28 @@ int readint(char *buff) {
     return INT_MAX;
 }
 
+void usage() {
+    fprintf(stderr, "\
+Usage: freqcd [-i infilename] [-o outfilename] [-x]\n\
+              [-f freqcorr] [-F freqfilename] [-d]\n\
+Performs frequency correction of timestamps emitted by qcrypto's readevents.\n\
+Shows this help with '-h' option.\n\
+\n\
+Data stream options:\n\
+  -i infilename    File/socket name for source events. Defaults to stdin.\n\
+  -o outfilename   File/socket name for corrected events. Defaults to stdout.\n\
+  -F freqfilename  File/socket name of frequency correction values.\n\
+\n\
+Encoding options:\n\
+  -x               Use legacy timestamp format.\n\
+  -f freqcorr      Frequency offset, in units of 2^-34 (range: 0-2097151).\n\
+  -d               Use units of 0.1ppb for '-f' (range: 0-1220703).\n\
+\n\
+More descriptive documentation:\n\
+<https://github.com/franciumxzf/fpfind/blob/main/src/fpfind/freqcd.c>\n\
+");
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -157,7 +179,7 @@ int main(int argc, char *argv[]) {
     int isdecimal = 0;  // mark if frequency input is in decimal units
     int opt;  // for getopt options
     opterr = 0;  // be quiet when no options supplied
-    while ((opt = getopt(argc, argv, "i:o:F:f:xd")) != EOF) {
+    while ((opt = getopt(argc, argv, "i:o:F:f:xdh")) != EOF) {
         switch (opt) {
         case 'i':
             if (sscanf(optarg, FNAMEFORMAT, infilename) != 1) return -emsg(2);
@@ -179,6 +201,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'd':
             isdecimal = 1;
+            break;
+        case 'h':
+            usage(); exit(1);
             break;
         }
     }

@@ -4,9 +4,6 @@ data
 data_win
 src/fpfind/freqcd_path
 
-# Compiled C files
-src/fpfind/freqcd
-
 # Compiled python files
 **/__pycache__
 **/.pytest_cache
