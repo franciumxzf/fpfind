@@ -1,24 +1,33 @@
 # fpfind
 
-## Quick start
+## Usage
 
+Install the library, and run the post-installation script (which will compile `freqcd.c`, requires `gcc`).
+
+```bash
+pip3 install git+https://github.com/franciumxzf/fpfind.git
+fpfind_postinstall
 ```
-make install
-make
-make test
+
+Binaries and scripts will be exposed to the path; commonly used scripts are listed below.
+
+```bash
+fpfind -t {TIMESTAMPS1} -T {TIMESTAMPS2} -n 1 -q 25 -S 4
+freqcd -x -df 568 < {TIMESTAMPS}
+parse_timestamps -A1 -X -p {TIMESTAMPS}
 ```
 
-## Installation
+## Development
 
-Run the `install` rule in Makefile, which will install [Poetry](https://python-poetry.org/) and the dependencies listed in [pyproject.toml](pyproject.toml).
+Clone the repository, then run the `install` rule in Makefile, which will install [Poetry](https://python-poetry.org/) and the dependencies listed in [pyproject.toml](pyproject.toml).
 
-```
+```bash
 make install
 ```
 
 If `Make` is unavailable on your system, e.g. on Windows (although a [GNU Win32 port of Make](https://gnuwin32.sourceforge.net/packages/make.htm) is available), the commands in the Makefile can be run manually as well,
 
-```
+```bash
 pip install -U poetry
 poetry install
 ```
@@ -32,7 +41,7 @@ As the `fpfind` library is installed in editable mode, some notes when developin
 1. Internal importing should import from the `fpfind` library, as per usual package development workflows.
 1. Testing of the library should primarily be done via a testing framework, i.e. [test-driven development](https://en.wikipedia.org/wiki/Test-driven_development).
    * Alternatively, activate the virtual environment to import `fpfind` for running locally, i.e. `poetry shell; python; import fpfind;`
-   * In a one-liner: `poetry run python -ic "import fpfind"` 
+   * In a one-liner: `poetry run python -ic "import fpfind"`
 
 Since the `poetry` package installed in this manner will tie it to the local Python installation, the `poetry.lock` should not be committed to the repository. Once onboarding instructions are changed to [system-wide installation](https://python-poetry.org/docs/), dependency locking should be enabled by removing `poetry.lock` from the `.gitignore` file.
 
@@ -40,7 +49,7 @@ Since the `poetry` package installed in this manner will tie it to the local Pyt
 
 If a local installation of `fpfind` is desired, use the following command:
 
-```
+```bash
 pip install -e .
 ```
 
@@ -48,13 +57,13 @@ pip install -e .
 
 Tests can be run using `make test`, or equivalently:
 
-```
+```bash
 poetry run pytest
 ```
 
 If successful, the following screen below should appear:
 
-```
+```bash
 > make test
 poetry run pytest
 ===================== test session starts =====================

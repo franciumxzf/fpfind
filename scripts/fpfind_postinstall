@@ -1,0 +1,22 @@
+#!/bin/sh
+# Small script to trigger post-install compilation of freqcd
+LIBNAME=fpfind
+
+# Get root directory of installed library
+# Hardcoded, but at least relative path should remain the same
+ENTRYPOINT=$(python3 -c "import importlib; print(importlib.util.find_spec('${LIBNAME}').origin)")
+ENTRYPOINT_DIR=$(dirname "$(readlink -f "${ENTRYPOINT}")")
+REPO_ROOT=${ENTRYPOINT_DIR}/../..
+
+# Possible alternative to sourcing root directory:
+# Relying on package manager to identify actual install location,
+# because it may break otherwise, e.g. pyenv saving the command as
+# a shim, so the expected script location in filesystem is different.
+# Problems: (1) directory of library has version appended
+#           (2) pip may not have been used for package management
+#
+#PKGROOT=$(python3 -m pip show ${LIBNAME} | grep 'Location' | awk -F ': ' '{print $2}')
+#REPO_ROOT=${PKGROOT}/${LIBNAME}
+
+# Run make in repository root (compiles freqcd)
+cd ${REPO_ROOT} && make
