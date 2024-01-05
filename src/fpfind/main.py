@@ -7,10 +7,11 @@ from scipy.fft import fft, ifft
 import sys
 import pathlib
 
+from fpfind.lib.parse_timestamps import read_a1
 from fpfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
-DELTA_U_STEP = 1e-5 # whether to put as an option
-DELTA_U_MAX = 0
+DELTA_U_STEP = 1e-6 # whether to put as an option
+DELTA_U_MAX = 1e-4
 TIMESTAMP_RESOLUTION = 256
 EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
@@ -18,6 +19,8 @@ Ta = 2**29 #acquisition time interval/ num of periods/ epochs
 Ts = 6 * Ta #separation time interval
 delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
+
+logger = logging.getLogger("__main__")
 
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
@@ -173,38 +176,108 @@ def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, s
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
     return timestamp
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Performs fpfind procedure. If raw timestamps are supplied, the encoding format is expected to be 'a1X'. See qcrypto documentation for timestamp filespec."
+    )
+
+    # Remove metavariable name, by method injection. Makes for cleaner UI.
+    def _add_argument(*args, **kwargs):
+        kwargs.update(metavar="")
+        return parser._add_argument(*args, **kwargs)
+    parser._add_argument = parser.add_argument
+    parser.add_argument = _add_argument
+
+    # Disable Black formatting
+    # fmt: off
+    parser.add_argument(
+        "-d", "--sendfiles",
+        help="SENDFILES")
+    parser.add_argument(
+        "-D", "--t1files",
+        help="T1FILES (reference)")
+    parser.add_argument(
+        "-t", "--target",
+        help="Low-count side timestamp file")
+    parser.add_argument(
+        "-T", "--reference",
+        help="High-count side timestamp file (reference)")
+    parser.add_argument(
+        "-V", "--verbosity", type=int,
+        help="Specify output verbosity")
+    parser.add_argument(
+        "-e", "--first-epoch",
+        help="Specify first overlapping epoch between the two remotes")
+    parser.add_argument(
+        "-n", "--num-epochs", type=int, default=1,
+        help="Specify number of epochs to use")
+    parser.add_argument(
+        "-s", "--separation", type=int, default=6,
+        help="Specify width of separation, in units of epochs.")
+    parser.add_argument(
+        "-q", "--buffer-order", type=int, default=20,
+        help="Specify FFT buffer order, N = 2**q")
+    parser.add_argument(
+        "-r", "--resolution", type=int, default=1,
+        help="Specify desired timing resolution, in integer units of ns.")
+    parser.add_argument(
+        "-S", "--threshold", type=float, default=6,
+        help="Specify the statistical significance threshold.")
+    parser.add_argument(
+        "--skip", "--skip-epochs", type=int, default=0,
+        help="Specify number of skip epochs")
+    # fmt: on
+
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+
+    args = parser.parse_args()
+
+    first_epoch = args.first_epoch
+    skip_epoch = args.skip
+    num_of_epochs = args.num_epochs
+    separation_width = args.separation
+
+    # alice: low count side - chopper - HeadT2 - sendfiles
+    # bob: high count side - chopper2 - HeadT1 - t1files
+
+    if args.sendfiles is not None and args.t1files is not None:
+        alice = get_timestamp(args.sendfiles, 'T2', first_epoch, skip_epoch, num_of_epochs, separation_width)
+        bob = get_timestamp(args.t1files, 'T1', first_epoch, skip_epoch, num_of_epochs, separation_width)
+    elif args.target is not None and args.reference is not None:
+        ta = read_a1(args.target, legacy=True)[0]
+        tb = read_a1(args.reference, legacy=True)[0]
+        # TODO: Parse ta[0] as epoch value then split from there
+        offset_start = skip_epoch*EPOCH_LENGTH
+        offset_end = offset_start + num_of_epochs*EPOCH_LENGTH
+        offset_start_wsep = offset_start + (separation_width*num_of_epochs)*EPOCH_LENGTH
+        offset_end_wsep = offset_start_wsep + num_of_epochs*EPOCH_LENGTH
+        # Ignore first epoch
+        ta0 = ta - ta[0]; tb0 = tb - tb[0]
+        alice = ta[
+            ((ta0 >= offset_start) & (ta0 <= offset_end)) |
+            ((ta0 >= offset_start_wsep) & (ta0 <= offset_end_wsep))
+        ]
+        bob = tb[
+            ((tb0 >= offset_start) & (tb0 <= offset_end)) |
+            ((tb0 >= offset_start_wsep) & (tb0 <= offset_end_wsep))
+        ]
+    else:
+        logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
+        sys.exit(1)
+
+    # TODO: Change this, avoid modifying globals...
+    global S_th, Ta, Ts, delta_tmax, N
+    delta_tmax = args.resolution
+    Ta = num_of_epochs * EPOCH_LENGTH
+    N = 2 ** args.buffer_order
+    S_th = args.threshold
+    Ts = separation_width
+
+    td, fd = fpfind(bob, alice)
+    print(fd)
+    # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description = "")
-    parser.add_argument("-d", help="SENDFILES")
-    parser.add_argument("-D", help="T1FILES")
-    parser.add_argument("-V", type = int, help = "verbosity")
-    parser.add_argument("-e", help="first overlapping epoch between the two remotes")
-    parser.add_argument("-n", type = int, default = 1, help = "number of epochs")
-    parser.add_argument("-s", type = int, default = 6, help = "number of separation epochs")
-    parser.add_argument("-q", type = int, default = 20,  help = "FFT buffer order, N = 2**q")
-    parser.add_argument("-r", type = int, default = 1, help="desired timing resolution")
-    parser.add_argument("-S", type = float, default = 6, help = "statistical significance threshold")
-    parser.add_argument("--skip", type = int, default = 0, help = "number of skip epochs")
-
-    if len(sys.argv) > 1:
-        args = parser.parse_args()
-
-        first_epoch = args.e
-        skip_epoch = args.skip
-        num_of_epochs = args.n
-
-        # alice: low count side - chopper - HeadT2 - sendfiles
-        # bob: high count side - chopper2 - HeadT1 - t1files
-
-        alice = get_timestamp(args.d, 'T2', first_epoch, skip_epoch, num_of_epochs, args.s)
-        bob = get_timestamp(args.D, 'T1', first_epoch, skip_epoch, num_of_epochs, args.s)
-
-        delta_tmax = args.r
-        Ta = num_of_epochs * EPOCH_LENGTH
-        Ts = args.s * Ta
-        N = 2 ** args.q
-        S_th = args.S
-
-        td, fd = fpfind(bob, alice)
-        print(fd)
-        # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
+    main()
