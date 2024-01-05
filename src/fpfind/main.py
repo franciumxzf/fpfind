@@ -9,8 +9,8 @@ import pathlib
 
 from fpfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
-DELTA_U_STEP = 5e-5 # whether to put as an option
-DELTA_U_MAX = 2.5e-4
+DELTA_U_STEP = 1e-5 # whether to put as an option
+DELTA_U_MAX = 0
 TIMESTAMP_RESOLUTION = 256
 EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
@@ -36,7 +36,7 @@ def statistical_significance(arr):
     ck = np.max(arr)
     ck_average = np.mean(arr)
     S = (ck - ck_average) / np.std(arr)
-    return S                    
+    return S
 
 def process_timestamp(arr, start_time, delta_t):
     new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
@@ -58,7 +58,7 @@ def time_freq(arr_a, arr_b):
     bin_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
     bin_arr_b1 = process_timestamp(arr_b, T_start, delta_t)
     arr_c1 = cross_corr(bin_arr_a1, bin_arr_b1)
-    
+
     while statistical_significance(arr_c1) <= S_th:
         if delta_t > 5e6: # if delta_t goes too large and still cannot find the peak, means need to change the hyperparameters
             raise ValueError("Cannot successfully find the peak!")
@@ -90,7 +90,7 @@ def time_freq(arr_a, arr_b):
 
             delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
             delta_T1 += delta_T1_correct
-    
+
         logging.debug("time offset: %d, no frequency offset", delta_T1)
         return delta_T1, 0
 
@@ -98,7 +98,7 @@ def time_freq(arr_a, arr_b):
     delta_T1_correct = 0
     delta_u_correct = 0
     u = 1 / (1 - delta_u)
-    
+
     while delta_t > delta_tmax:
         delta_t = delta_t / (Ts / Ta / math.sqrt(2))
         new_arr_b = (new_arr_b  - delta_T1_correct) / (1 - delta_u_correct)
@@ -128,18 +128,25 @@ def time_freq(arr_a, arr_b):
 def fpfind(alice, bob):
     iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
     iterating_list[::2] *= -1
+    # print(iterating_list * DELTA_U_STEP)
     for i in iterating_list:
-        delta_T, delta_u = time_freq(alice, bob / (1 + DELTA_U_STEP * i))
+        # print("Testing:", DELTA_U_STEP * i)
+        try:
+            delta_T, delta_u = time_freq(alice, bob / (1 + DELTA_U_STEP * i))
+        except:
+            continue
+        # print(delta_T, delta_u)
         delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
         if abs(delta_u1) < abs(delta_u) and abs(delta_u1) < 2e-7:
             delta_u = (1 + DELTA_U_STEP * i) * (1 + delta_u) * (1 + delta_u1) - 1
+            # print(delta_T, delta_u)
             break
     while abs(delta_u1) > 1e-10:
         delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
         delta_u = (1 + delta_u) * (1 + delta_u1) - 1
-    logging.debug(f"time result: {delta_T}, frequency result: {delta_u}")
+    # logging.debug(f"time result: {delta_T}, frequency result: {delta_u}")
     return delta_T, delta_u
-    
+
 def result_for_freqcd(alice, bob):
     alice_copy = alice.copy()
     bob_copy = bob.copy()
@@ -159,7 +166,7 @@ def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, s
         epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + i)
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
-        
+
     for i in range(num_of_epochs + 1):
         epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + sep * num_of_epochs + i)
         reader = read_T1 if file_type == "T1" else read_T2
@@ -199,4 +206,5 @@ if __name__ == "__main__":
         S_th = args.S
 
         td, fd = fpfind(bob, alice)
-        print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
+        print(fd)
+        # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
