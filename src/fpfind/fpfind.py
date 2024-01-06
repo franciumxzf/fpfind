@@ -6,6 +6,7 @@ If raw timestamps are supplied, the encoding format is expected to be 'a1X'. See
 Changelog:
     2024-01-06, Justin: Init documentation.
 """
+# fmt: off
 
 import logging
 import math
@@ -155,8 +156,8 @@ def fpfind(alice, bob):
     iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
     iterating_list[::2] *= -1
     logger.debug(
-        "Prepared %d precompensations: %s...",
-        len(iterating_list), iterating_list[:3],
+        "Prepared %d precompensation(s): %s... ppm",
+        len(iterating_list), ",".join(map(str,iterating_list[:3])),
     )
     print(iterating_list * DELTA_U_STEP)
     for i in iterating_list:
@@ -205,6 +206,8 @@ def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, s
     return timestamp
 
 import argparse
+
+# https://stackoverflow.com/a/23941599
 class CustomFormatter(argparse.HelpFormatter):
     def _format_action_invocation(self, action):
         if not action.option_strings:
@@ -232,17 +235,21 @@ class CustomFormatter(argparse.HelpFormatter):
                 parts[-1] += ' %s'%args_string
             return ', '.join(parts)
 
+
+# fmt: on
 def main():
+    script_name = Path(sys.argv[0]).name
     parser = configargparse.ArgumentParser(
-        default_config_files=[f"{Path(__file__).name}.default.conf"],
+        default_config_files=[f"{script_name}.default.conf"],
         description=__doc__.partition("Changelog:")[0],
         formatter_class=CustomFormatter,
     )
-    print(Path(__file__).name)
+
     # Remove metavariable name, by method injection. Makes for cleaner UI.
     def _add_argument(*args, **kwargs):
         kwargs.update(metavar="")
         return parser._add_argument(*args, **kwargs)
+
     parser._add_argument = parser.add_argument
     parser.add_argument = _add_argument
 
@@ -297,17 +304,21 @@ def main():
         "-k", "--skip-epochs", type=int, default=0,
         help="Specify number of skip epochs")
     # fmt: on
+    args = parser.parse_args()
 
-    if len(sys.argv) == 1:
+    # Check whether options have been supplied, and print help otherwise
+    args_sources = parser.get_source_to_settings_dict().keys()
+    config_supplied = any(map(lambda x: x.startswith("config_file"), args_sources))
+    if len(sys.argv) == 1 and not config_supplied:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    args = parser.parse_args()
-
     first_epoch = args.first_epoch
-    skip_epoch = args.skip
+    skip_epoch = args.skip_epochs
     num_of_epochs = args.num_epochs
     separation_width = args.separation
+
+    # fmt: off
 
     # alice: low count side - chopper - HeadT2 - sendfiles
     # bob: high count side - chopper2 - HeadT1 - t1files
@@ -355,6 +366,7 @@ def main():
     td, fd = fpfind(bob, alice)
     print(fd)
     # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
+
 
 if __name__ == "__main__":
     main()
