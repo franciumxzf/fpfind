@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
-import argparse
-import numpy as np
+"""Performs fpfind procedure.
+
+If raw timestamps are supplied, the encoding format is expected to be 'a1X'. See qcrypto documentation for timestamp filespec.
+
+Changelog:
+    2024-01-06, Justin: Init documentation.
+"""
+
 import logging
 import math
-from scipy.fft import fft, ifft
-import sys
 import pathlib
+import sys
+from pathlib import Path
 
+import configargparse
+import numpy as np
+from scipy.fft import fft, ifft
+
+from fpfind.lib.parse_epochs import epoch2int, int2epoch, read_T1, read_T2
 from fpfind.lib.parse_timestamps import read_a1
-from fpfind.lib.parse_epochs import read_T1, read_T2, epoch2int, int2epoch
 
 DELTA_U_STEP = 1e-6 # whether to put as an option
-DELTA_U_MAX = 1e-4
+DELTA_U_MAX = 0 #1e-4
 TIMESTAMP_RESOLUTION = 256
 EPOCH_LENGTH = 2 ** 29
 S_th = 6 #significance limit
@@ -20,7 +30,20 @@ Ts = 6 * Ta #separation time interval
 delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
 
-logger = logging.getLogger("__main__")
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="{asctime}\t{levelname:<8s}\t{funcName}:{lineno} | {message}",
+            datefmt="%Y%m%d_%H%M%S",
+            style="{",
+        )
+    )
+    logger.addHandler(handler)
+    logger.propagate = False
+
 
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
@@ -131,14 +154,19 @@ def time_freq(arr_a, arr_b):
 def fpfind(alice, bob):
     iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
     iterating_list[::2] *= -1
-    # print(iterating_list * DELTA_U_STEP)
+    logger.debug(
+        "Prepared %d precompensations: %s...",
+        len(iterating_list), iterating_list[:3],
+    )
+    print(iterating_list * DELTA_U_STEP)
     for i in iterating_list:
-        # print("Testing:", DELTA_U_STEP * i)
+        precomp = DELTA_U_STEP * i
+        logger.debug("Applying %.3f ppm precompensation.", precomp*1e6)
         try:
-            delta_T, delta_u = time_freq(alice, bob / (1 + DELTA_U_STEP * i))
+            delta_T, delta_u = time_freq(alice, bob / (1 + precomp))
         except:
             continue
-        # print(delta_T, delta_u)
+        print(delta_T, delta_u)
         delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
         if abs(delta_u1) < abs(delta_u) and abs(delta_u1) < 2e-7:
             delta_u = (1 + DELTA_U_STEP * i) * (1 + delta_u) * (1 + delta_u1) - 1
@@ -176,11 +204,41 @@ def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, s
         timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
     return timestamp
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Performs fpfind procedure. If raw timestamps are supplied, the encoding format is expected to be 'a1X'. See qcrypto documentation for timestamp filespec."
-    )
+import argparse
+class CustomFormatter(argparse.HelpFormatter):
+    def _format_action_invocation(self, action):
+        if not action.option_strings:
+            _ = self._metavar_formatter(action, action.dest)(1)
+            print(action, _)
+            metavar, = _
+            return metavar
+        else:
+            parts = []
+            # if the Optional doesn't take a value, format is:
+            #    -s, --long
+            if action.nargs == 0:
+                parts.extend(action.option_strings)
 
+            # if the Optional takes a value, format is:
+            #    -s ARGS, --long ARGS
+            # change to
+            #    -s, --long ARGS
+            else:
+                default = action.dest.upper()
+                args_string = self._format_args(action, default)
+                for option_string in action.option_strings:
+                    #parts.append('%s %s' % (option_string, args_string))
+                    parts.append('%s' % option_string)
+                parts[-1] += ' %s'%args_string
+            return ', '.join(parts)
+
+def main():
+    parser = configargparse.ArgumentParser(
+        default_config_files=[f"{Path(__file__).name}.default.conf"],
+        description=__doc__.partition("Changelog:")[0],
+        formatter_class=CustomFormatter,
+    )
+    print(Path(__file__).name)
     # Remove metavariable name, by method injection. Makes for cleaner UI.
     def _add_argument(*args, **kwargs):
         kwargs.update(metavar="")
@@ -190,6 +248,18 @@ def main():
 
     # Disable Black formatting
     # fmt: off
+    parser.add_argument(
+        "--config", is_config_file_arg=True,
+        help="Path to configuration file")
+    parser.add_argument(
+        "--save", is_write_out_config_file_arg=True,
+        help="Path to configuration file for saving, then immediately exit")
+    parser._add_argument(
+        "--quiet", action="store_true",
+        help="Suppress errors, but will not block logging")
+    parser._add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Specify debug verbosity, e.g. -vv for more verbosity")
     parser.add_argument(
         "-d", "--sendfiles",
         help="SENDFILES")
@@ -224,7 +294,7 @@ def main():
         "-S", "--threshold", type=float, default=6,
         help="Specify the statistical significance threshold.")
     parser.add_argument(
-        "--skip", "--skip-epochs", type=int, default=0,
+        "-k", "--skip-epochs", type=int, default=0,
         help="Specify number of skip epochs")
     # fmt: on
 
@@ -242,10 +312,14 @@ def main():
     # alice: low count side - chopper - HeadT2 - sendfiles
     # bob: high count side - chopper2 - HeadT1 - t1files
 
+    logger.debug("Processing timestamps")
     if args.sendfiles is not None and args.t1files is not None:
+        logger.debug("Reading from directories.")
         alice = get_timestamp(args.sendfiles, 'T2', first_epoch, skip_epoch, num_of_epochs, separation_width)
         bob = get_timestamp(args.t1files, 'T1', first_epoch, skip_epoch, num_of_epochs, separation_width)
+
     elif args.target is not None and args.reference is not None:
+        logger.debug("Reading from timestamp files.")
         ta = read_a1(args.target, legacy=True)[0]
         tb = read_a1(args.reference, legacy=True)[0]
         # TODO: Parse ta[0] as epoch value then split from there
@@ -263,6 +337,8 @@ def main():
             ((tb0 >= offset_start) & (tb0 <= offset_end)) |
             ((tb0 >= offset_start_wsep) & (tb0 <= offset_end_wsep))
         ]
+        logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
+
     else:
         logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
         sys.exit(1)
@@ -275,6 +351,7 @@ def main():
     S_th = args.threshold
     Ts = separation_width
 
+    logger.debug("Triggered fpfind main routine.")
     td, fd = fpfind(bob, alice)
     print(fd)
     # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
