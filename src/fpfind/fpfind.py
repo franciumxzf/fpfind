@@ -8,10 +8,14 @@ Changelog:
 """
 # fmt: off
 
+import functools
+import inspect
 import logging
 import math
+import os
 import pathlib
 import sys
+import time
 from pathlib import Path
 
 import configargparse
@@ -20,6 +24,9 @@ from scipy.fft import fft, ifft
 
 from fpfind.lib.parse_epochs import epoch2int, int2epoch, read_T1, read_T2
 from fpfind.lib.parse_timestamps import read_a1
+
+from S15lib.g2lib.g2lib import generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics, histogram
+from S15lib.g2lib.parse_timestamps import read_a1
 
 DELTA_U_STEP = 1e-6 # whether to put as an option
 DELTA_U_MAX = 0 #1e-4
@@ -31,13 +38,27 @@ Ts = 6 * Ta #separation time interval
 delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
 N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
 
+class CustomFormatter(logging.Formatter):
+    """Supports injection of custom name overrides during logging.
+    
+    Copied from <https://stackoverflow.com/a/71228329>.
+    """
+    def format(self, record):
+        if hasattr(record, "_funcname"):
+            record.funcName = record._funcname
+        if hasattr(record, "_filename"):
+            record.filename = record._filename
+        if hasattr(record, "_lineno"):
+            record.lineno= record._lineno
+        return super().format(record)
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
     handler = logging.StreamHandler(stream=sys.stderr)
     handler.setFormatter(
-        logging.Formatter(
-            fmt="{asctime}\t{levelname:<8s}\t{funcName}:{lineno} | {message}",
+        CustomFormatter(
+            fmt="{asctime}\t{levelname:<7s}\t{funcName}:{lineno}\t| {message}",
             datefmt="%Y%m%d_%H%M%S",
             style="{",
         )
@@ -46,6 +67,51 @@ if not logger.handlers:
     logger.propagate = False
 
 
+PROFILE_INDENT = 0
+
+def profile(f):
+    """Performs a simple timing profile.
+
+    Modifies the logging facility to log the name and lineno of the function
+    being called, instead of the usual encapsulating function.
+    
+    Possibly thread-safe, but may not yield the correct indentation levels
+    during execution, in that situation.
+    """
+
+    # Allows actual function to be logged rather than wrapped
+    caller = inspect.getframeinfo(inspect.stack()[1][0])
+    extras = {
+        "_funcname": f"[{f.__name__}]",
+        "_filename": os.path.basename(caller.filename),
+        # "_lineno": caller.lineno,  # this returns the @profile lineno instead
+    }
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        global PROFILE_INDENT
+        indent_level = PROFILE_INDENT
+        PROFILE_INDENT += 1
+        logger.debug(
+            "Started profiling...",
+            stacklevel=2, extra=extras,
+        )
+
+        start = time.time()
+        result = f(*args, **kwargs)
+        end = time.time()
+
+        elapsed = end - start
+        logger.debug(
+            "Completed profiling: %.0f s", elapsed,
+            stacklevel=2, extra=extras,
+        )
+        PROFILE_INDENT -= 1
+        return result
+
+    return wrapper
+
+@profile
 def cross_corr(arr1, arr2):
     return ifft(np.conjugate(fft(arr1)) * fft(arr2))
 
@@ -62,6 +128,9 @@ def find_max(arr):
 def statistical_significance(arr):
     ck = np.max(arr)
     ck_average = np.mean(arr)
+    stdev = np.std(arr)
+    if stdev == 0:
+        return None
     S = (ck - ck_average) / np.std(arr)
     return S
 
@@ -73,6 +142,7 @@ def process_timestamp(arr, start_time, delta_t):
     bin_arr[result] = 1
     return bin_arr
 
+@profile
 def time_freq(arr_a, arr_b):
     delta_t = 256 #smallest discretization time, need to make this initial dt a free variable
 
@@ -86,6 +156,9 @@ def time_freq(arr_a, arr_b):
     bin_arr_b1 = process_timestamp(arr_b, T_start, delta_t)
     arr_c1 = cross_corr(bin_arr_a1, bin_arr_b1)
 
+    ss = statistical_significance(arr_c1)
+    if ss is None:
+        raise ValueError("Cross-correlation is flat-lined: [FIXME]")
     while statistical_significance(arr_c1) <= S_th:
         if delta_t > 5e6: # if delta_t goes too large and still cannot find the peak, means need to change the hyperparameters
             raise ValueError("Cannot successfully find the peak!")
@@ -106,19 +179,23 @@ def time_freq(arr_a, arr_b):
 
     if abs(delta_u) < 1e-10:
         while delta_t > delta_tmax:
+            logger.debug("dt yet to converge: %.1f --> %.1f", delta_t, delta_tmax)
+            logger.debug("%s %s", Ts, Ta)
             delta_t = delta_t / (Ts / Ta / math.sqrt(2))
             new_arr_b = arr_b - delta_T1
             new_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
             new_arr_b1 = process_timestamp(new_arr_b, T_start, delta_t)
             new_arr_c1 = cross_corr(new_arr_a1, new_arr_b1)
 
-            if statistical_significance(new_arr_c1) < 6: # if the peak is too low, high likely the result is wrong
+            peak_sig = statistical_significance(new_arr_c1)
+            logger.debug("Peak significance: %.1f", peak_sig)
+            if peak_sig < 6: # if the peak is too low, high likely the result is wrong
                 break
 
             delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
             delta_T1 += delta_T1_correct
 
-        logging.debug("time offset: %d, no frequency offset", delta_T1)
+        logger.debug("time offset: %d, no frequency offset", delta_T1)
         return delta_T1, 0
 
     new_arr_b = (arr_b - delta_T1) / (1 - delta_u)
@@ -152,6 +229,7 @@ def time_freq(arr_a, arr_b):
     # logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
     return delta_T1, delta_u
 
+@profile
 def fpfind(alice, bob):
     iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
     iterating_list[::2] *= -1
@@ -159,7 +237,6 @@ def fpfind(alice, bob):
         "Prepared %d precompensation(s): %s... ppm",
         len(iterating_list), ",".join(map(str,iterating_list[:3])),
     )
-    print(iterating_list * DELTA_U_STEP)
     for i in iterating_list:
         precomp = DELTA_U_STEP * i
         logger.debug("Applying %.3f ppm precompensation.", precomp*1e6)
@@ -305,6 +382,7 @@ def main():
         help="Specify number of skip epochs")
     # fmt: on
     args = parser.parse_args()
+    logger.debug("%s", args)
 
     # Check whether options have been supplied, and print help otherwise
     args_sources = parser.get_source_to_settings_dict().keys()
@@ -360,7 +438,7 @@ def main():
     Ta = num_of_epochs * EPOCH_LENGTH
     N = 2 ** args.buffer_order
     S_th = args.threshold
-    Ts = separation_width
+    Ts = separation_width * Ta
 
     logger.debug("Triggered fpfind main routine.")
     td, fd = fpfind(bob, alice)
