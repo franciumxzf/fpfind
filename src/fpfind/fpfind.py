@@ -1,63 +1,40 @@
 #!/usr/bin/env python3
-"""Performs fpfind procedure.
-
-If raw timestamps are supplied, the encoding format is expected to be 'a1X'. See qcrypto documentation for timestamp filespec.
+"""TODO
 
 Changelog:
-    2024-01-06, Justin: Init documentation.
-"""
-# fmt: off
+    2023-01-09, Justin: Refactoring from fpfind.py
 
-import functools
+"""
+
 import inspect
+import functools
 import logging
-import math
 import os
-import pathlib
 import sys
 import time
 from pathlib import Path
 
 import configargparse
 import numpy as np
-from scipy.fft import fft, ifft
 
-from fpfind.lib.parse_epochs import epoch2int, int2epoch, read_T1, read_T2
 from fpfind.lib.parse_timestamps import read_a1
+from fpfind.lib.utils import generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics
 
-from S15lib.g2lib.g2lib import generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics, histogram
-from S15lib.g2lib.parse_timestamps import read_a1
+from fpfind.lib.utils import (
+    ArgparseCustomFormatter, LoggingCustomFormatter,
+    get_timestamp,
+)
+from fpfind.lib.constants import (
+    EPOCH_LENGTH,
+)
 
-DELTA_U_STEP = 1e-6 # whether to put as an option
-DELTA_U_MAX = 0 #1e-4
-TIMESTAMP_RESOLUTION = 256
-EPOCH_LENGTH = 2 ** 29
-S_th = 6 #significance limit
-Ta = 2**29 #acquisition time interval/ num of periods/ epochs
-Ts = 6 * Ta #separation time interval
-delta_tmax = 1 # the maximum acceptable delta_t to start tracking/ timing resolution
-N = 2**20 #bin number, note that this N remains unchanged during the whole algorithm/ buffer order
-
-class CustomFormatter(logging.Formatter):
-    """Supports injection of custom name overrides during logging.
-    
-    Copied from <https://stackoverflow.com/a/71228329>.
-    """
-    def format(self, record):
-        if hasattr(record, "_funcname"):
-            record.funcName = record._funcname
-        if hasattr(record, "_filename"):
-            record.filename = record._filename
-        if hasattr(record, "_lineno"):
-            record.lineno= record._lineno
-        return super().format(record)
-
+# Setup logging mechanism
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
     handler = logging.StreamHandler(stream=sys.stderr)
     handler.setFormatter(
-        CustomFormatter(
+        LoggingCustomFormatter(
             fmt="{asctime}\t{levelname:<7s}\t{funcName}:{lineno}\t| {message}",
             datefmt="%Y%m%d_%H%M%S",
             style="{",
@@ -65,9 +42,6 @@ if not logger.handlers:
     )
     logger.addHandler(handler)
     logger.propagate = False
-
-
-PROFILE_INDENT = 0
 
 def profile(f):
     """Performs a simple timing profile.
@@ -89,9 +63,6 @@ def profile(f):
 
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        global PROFILE_INDENT
-        indent_level = PROFILE_INDENT
-        PROFILE_INDENT += 1
         logger.debug(
             "Started profiling...",
             stacklevel=2, extra=extras,
@@ -106,211 +77,172 @@ def profile(f):
             "Completed profiling: %.0f s", elapsed,
             stacklevel=2, extra=extras,
         )
-        PROFILE_INDENT -= 1
         return result
 
     return wrapper
 
+
+# Main algorithm
 @profile
-def cross_corr(arr1, arr2):
-    return ifft(np.conjugate(fft(arr1)) * fft(arr2))
+def time_freq(
+        ats, bts,
+        num_wraps, resolution, num_bins, threshold, separation_duration,
+    ):
+    # TODO: Be careful of slice timestamps
+    # BOOKKEEPING
+    target_resolution = resolution
+    start_time = max(ats[0], bts[0])
+    duration = num_wraps * resolution * num_bins
 
-def find_max(arr):
-    arr_real = arr.real
-    time_diff = 0
-    max_value = arr_real[time_diff]
-    time_diff = np.argmax(arr_real)
-    max_value = arr_real[time_diff]
-    if time_diff > (len(arr_real) / 2):
-        time_diff -= len(arr_real)
-    return time_diff, max_value
+    logger.debug(
+        "Running with 2^%d bins of width %.0f ns, with start bias %.1e ns",
+        np.int32(np.log2(num_bins)), resolution, start_time/1e9,
+    )
+    logger.debug(
+        "Biased: ats = %s...%s, bts = %s...%s",
+        ats[[0,1]] - start_time,
+        ats[[-1]] - start_time,
+        bts[[0,1]] - start_time,
+        bts[[-1]] - start_time,
+    )
 
-def statistical_significance(arr):
-    ck = np.max(arr)
-    ck_average = np.mean(arr)
-    stdev = np.std(arr)
-    if stdev == 0:
-        return None
-    S = (ck - ck_average) / np.std(arr)
-    return S
+    # Quit if df is near zero, i.e. no need to correct
+    dt = 0
+    df1 = 0
+    f = 1
+    is_peak_found = False
+    while True:
 
-def process_timestamp(arr, start_time, delta_t):
-    new_arr = arr[np.where((arr > start_time) & (arr <= start_time + Ta))]
-    bin_arr = np.zeros(N, dtype = np.int32)
-    #t/delta_t mod N
-    result = np.int32((new_arr // delta_t) % N)
-    bin_arr[result] = 1
-    return bin_arr
+        # Earlier cross-correlation
+        logger.debug("Performing earlier xcorr")
+        afft = generate_fft(
+            slice_timestamps(ats, start_time, duration),
+            num_bins, resolution)
+        bfft = generate_fft(
+            slice_timestamps(bts, start_time, duration),
+            num_bins, resolution)
+        ys = get_xcorr(afft, bfft)
 
-@profile
-def time_freq(arr_a, arr_b):
-    delta_t = 256 #smallest discretization time, need to make this initial dt a free variable
-
-    T_start = max(arr_a[0], arr_b[0])
-    arr_a -= T_start
-    arr_b -= T_start
-    T_start = 0
-
-    #generate arrays according to equation (6)
-    bin_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
-    bin_arr_b1 = process_timestamp(arr_b, T_start, delta_t)
-    arr_c1 = cross_corr(bin_arr_a1, bin_arr_b1)
-
-    ss = statistical_significance(arr_c1)
-    if ss is None:
-        raise ValueError("Cross-correlation is flat-lined: [FIXME]")
-    while statistical_significance(arr_c1) <= S_th:
-        if delta_t > 5e6: # if delta_t goes too large and still cannot find the peak, means need to change the hyperparameters
-            raise ValueError("Cannot successfully find the peak!")
-        #halve the size of the array {ck} by adding entries pairwise
-        arr_c1 = np.sum(arr_c1.reshape(-1, 2), axis = 1)
-        delta_t *= 2 #doubles the effective time resolution
-
-    #After this step, we can determine the peak position from the array and the effective time resolution
-    delta_T1 = find_max(arr_c1)[0] * delta_t
-
-    #now the delta_t is already the effective time resolution
-    bin_arr_a2 = process_timestamp(arr_a, T_start + Ts, delta_t)
-    bin_arr_b2 = process_timestamp(arr_b, T_start + Ts, delta_t)
-    arr_c2 = cross_corr(bin_arr_a2, bin_arr_b2)
-    delta_T2 = find_max(arr_c2)[0] * delta_t
-
-    delta_u = (delta_T1 - delta_T2) / Ts
-
-    if abs(delta_u) < 1e-10:
-        while delta_t > delta_tmax:
-            logger.debug("dt yet to converge: %.1f --> %.1f", delta_t, delta_tmax)
-            logger.debug("%s %s", Ts, Ta)
-            delta_t = delta_t / (Ts / Ta / math.sqrt(2))
-            new_arr_b = arr_b - delta_T1
-            new_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
-            new_arr_b1 = process_timestamp(new_arr_b, T_start, delta_t)
-            new_arr_c1 = cross_corr(new_arr_a1, new_arr_b1)
-
-            peak_sig = statistical_significance(new_arr_c1)
-            logger.debug("Peak significance: %.1f", peak_sig)
-            if peak_sig < 6: # if the peak is too low, high likely the result is wrong
+        # Confirm resolution on first run
+        while not is_peak_found:
+            logger.debug("Performing first peak observation")
+            stats = get_statistics(ys, resolution)
+            logger.debug("S = %6.3f, dT = %s ns", stats.significance, dt)
+            if stats.significance == 0:
+                raise ValueError("Flatlined, need to increase number of bins")
+            if stats.significance >= threshold:
+                is_peak_found = True
+                logger.debug("Peak found, with resolution %.0f ns", resolution)
                 break
+            
+            # Increase the bin width
+            ys = np.sum(ys.reshape(-1, 2), axis = 1)
+            resolution *= 2
+            logger.debug("Doubling resolution to %.0f ns", resolution)
+            if resolution > 5e6:
+                raise ValueError("Number of bins too little.")
 
-            delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
-            delta_T1 += delta_T1_correct
-
-        logger.debug("time offset: %d, no frequency offset", delta_T1)
-        return delta_T1, 0
-
-    new_arr_b = (arr_b - delta_T1) / (1 - delta_u)
-    delta_T1_correct = 0
-    delta_u_correct = 0
-    u = 1 / (1 - delta_u)
-
-    while delta_t > delta_tmax:
-        delta_t = delta_t / (Ts / Ta / math.sqrt(2))
-        new_arr_b = (new_arr_b  - delta_T1_correct) / (1 - delta_u_correct)
-
-        new_arr_a1 = process_timestamp(arr_a, T_start, delta_t)
-        new_arr_b1 = process_timestamp(new_arr_b, T_start, delta_t)
-        new_arr_c1 = cross_corr(new_arr_a1, new_arr_b1)
-        delta_T1_correct = find_max(new_arr_c1)[0] * delta_t
-
-        new_arr_a2 = process_timestamp(arr_a, T_start + Ts, delta_t)
-        new_arr_b2 = process_timestamp(new_arr_b, T_start + Ts, delta_t)
-        new_arr_c2 = cross_corr(new_arr_a2, new_arr_b2)
-        delta_T2_correct = find_max(new_arr_c2)[0] * delta_t
-
-        delta_T1 = delta_T1_correct + (delta_T1) / (1 - delta_u_correct)
-        delta_u_correct = (delta_T1_correct - delta_T2_correct) / Ts
-        u *= (1 / (1 - delta_u_correct))
-
-        if statistical_significance(new_arr_c1) < 6: # if the peak is too low, high likely the result is wrong - there might be a problem that the delta_t doesn't go to 1
+        # Check significance, lower than threshold, likely wrong
+        stats = get_statistics(ys, resolution)
+        if stats.significance < threshold:
+            logger.warning("TODO")
             break
 
-    delta_u = 1 / u - 1
-    # print("time offset: %d, frequency offset: %f", delta_T1, delta_u)
-    # logging.debug("time offset: %d, frequency offset: %f", delta_T1, delta_u)
-    return delta_T1, delta_u
+        # Later cross-correlation
+        logger.debug("Performing later xcorr")
+        _afft = generate_fft(
+            slice_timestamps(ats, start_time + separation_duration, duration),
+            num_bins, resolution)
+        _bfft = generate_fft(
+            slice_timestamps(bts, start_time + separation_duration, duration),
+            num_bins, resolution)
+        _ys = get_xcorr(_afft, _bfft)
+
+        # Calculate timing delay
+        xs = np.arange(num_bins) * resolution
+        dt1 = get_timing_delay_fft(ys, xs)[0]
+        _dt1 = get_timing_delay_fft(_ys, xs)[0]
+        logger.debug(
+            "dt1 = %.0f ns, and _dt1 = %.0f ns",
+            dt1, _dt1,
+        )
+
+        # dt = dt / (1 + df1) + dt1  # update with old frequency. TODO: Verify.
+        df1 = (_dt1 - dt1) / separation_duration
+        dt = (dt + dt1) / (1 + df1)
+        logger.debug(
+            "Current estimation: dt = %.0f ns, df = %.3f ppm, separation_duration = %s",
+            dt1, df1 * 1e6, separation_duration,
+        )
+        f *= 1 / (1 + df1)
+
+        # Stop if resolution met, otherwise refine resolution
+        if resolution <= target_resolution:
+            break
+
+        resolution = resolution / (separation_duration / duration / np.sqrt(2))
+        bts = (bts - dt1) / (1 + df1)  # update from current run
+
+    df = 1 / f - 1
+    logger.debug("Returning: dt = %.0f ns, df = %.3f ppm",
+        dt, df * 1e6,
+    )
+    return dt, df
 
 @profile
-def fpfind(alice, bob):
-    iterating_list = np.arange(1, int(DELTA_U_MAX // DELTA_U_STEP + 1) * 2) // 2
-    iterating_list[::2] *= -1
+def fpfind(alice, bob,
+           num_wraps,
+        num_bins, separation_duration, threshold, resolution,
+        precompensation_max, precompensation_step):
+    """Performs fpfind procedure.
+    
+    Args:
+        alice: Reference timestamps, in 'a1X' format.
+        bob: Target timestamps, in 'a1X' format.
+        duration: Acquisition duration.
+        num_bins: Number of FFT bins.
+        separation_duration: Ts
+        resolution: Timing resolution, in ns.
+        precompensation_max:
+        precompensation_step:
+    """
+    # Generating frequency precompensation values,
+    # e.g. for 10ppm, the sequence of values are:
+    # 0ppm, 10ppm, -10ppm, 20ppm, -20ppm, ...
+    df0s = np.arange(1, int(precompensation_max // precompensation_step + 1) * 2) // 2
+    df0s[::2] *= -1
+    df0s = df0s.astype(np.float64) * precompensation_step
     logger.debug(
         "Prepared %d precompensation(s): %s... ppm",
-        len(iterating_list), ",".join(map(str,iterating_list[:3])),
+        len(df0s), ",".join(map(str,df0s[:3])),
     )
-    for i in iterating_list:
-        precomp = DELTA_U_STEP * i
-        logger.debug("Applying %.3f ppm precompensation.", precomp*1e6)
-        try:
-            delta_T, delta_u = time_freq(alice, bob / (1 + precomp))
-        except:
-            continue
-        print(delta_T, delta_u)
-        delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
-        if abs(delta_u1) < abs(delta_u) and abs(delta_u1) < 2e-7:
-            delta_u = (1 + DELTA_U_STEP * i) * (1 + delta_u) * (1 + delta_u1) - 1
-            # print(delta_T, delta_u)
+
+    # Go through all precompensations
+    for df0 in df0s:
+        logger.debug("Applying %.3f ppm precompensation.", df0*1e6)
+
+        # Apply frequency precompensation df0
+        # TODO: CONTINUE
+        df = df0
+        dt, df1 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
+
+        # Apply additional frequency compensation
+        df = (1 + df) * (1 + df1) - 1
+        logger.debug("Applying %.3f ppm compensation.", df*1e6)
+        dt, df2 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
+
+        # If frequency compensation successful, the subsequent correction
+        # will be smaller. Assume next correction less than 0.2ppm.
+        if abs(df2) < abs(df1) and abs(df2) < 2e-7:
             break
-    while abs(delta_u1) > 1e-10:
-        delta_T, delta_u1 = time_freq(alice, bob / (1 + delta_u))
-        delta_u = (1 + delta_u) * (1 + delta_u1) - 1
-    # logging.debug(f"time result: {delta_T}, frequency result: {delta_u}")
-    return delta_T, delta_u
 
-def result_for_freqcd(alice, bob):
-    alice_copy = alice.copy()
-    bob_copy = bob.copy()
+    # Refine frequency estimation to +/-0.1ppb
+    df = (1 + df) * (1 + df2) - 1
+    while abs(df2) > 1e-10:
+        dt, df2 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
+        df = (1 + df) * (1 + df2) - 1
 
-    alice_freq = fpfind(bob, alice)[1]
-    bob_time = fpfind(alice_copy, bob_copy)[0]
-
-    print(f"{int(bob_time):d}\t{int(alice_freq * (1 << 34)):d}\n")
-
-    # time result: units of 1ns
-    # frequency result: units of 2e34
-
-def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, sep):
-    epoch_dir = pathlib.Path(dir_name)
-    timestamp = np.array([], dtype=np.float128)
-    for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + i)
-        reader = read_T1 if file_type == "T1" else read_T2
-        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
-
-    for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + sep * num_of_epochs + i)
-        reader = read_T1 if file_type == "T1" else read_T2
-        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
-    return timestamp
-
-import argparse
-
-# https://stackoverflow.com/a/23941599
-class CustomFormatter(argparse.HelpFormatter):
-    def _format_action_invocation(self, action):
-        if not action.option_strings:
-            _ = self._metavar_formatter(action, action.dest)(1)
-            print(action, _)
-            metavar, = _
-            return metavar
-        else:
-            parts = []
-            # if the Optional doesn't take a value, format is:
-            #    -s, --long
-            if action.nargs == 0:
-                parts.extend(action.option_strings)
-
-            # if the Optional takes a value, format is:
-            #    -s ARGS, --long ARGS
-            # change to
-            #    -s, --long ARGS
-            else:
-                default = action.dest.upper()
-                args_string = self._format_args(action, default)
-                for option_string in action.option_strings:
-                    #parts.append('%s %s' % (option_string, args_string))
-                    parts.append('%s' % option_string)
-                parts[-1] += ' %s'%args_string
-            return ', '.join(parts)
+    return dt, df
 
 
 # fmt: on
@@ -319,7 +251,7 @@ def main():
     parser = configargparse.ArgumentParser(
         default_config_files=[f"{script_name}.default.conf"],
         description=__doc__.partition("Changelog:")[0],
-        formatter_class=CustomFormatter,
+        formatter_class=ArgparseCustomFormatter,
     )
 
     # Remove metavariable name, by method injection. Makes for cleaner UI.
@@ -362,24 +294,23 @@ def main():
     parser.add_argument(
         "-e", "--first-epoch",
         help="Specify first overlapping epoch between the two remotes")
+    
+    # fpfind parameters
     parser.add_argument(
-        "-n", "--num-epochs", type=int, default=1,
-        help="Specify number of epochs to use")
+        "-k", "--num-wraps", type=int, default=1,
+        help="Specify number of arrays to wrap. Default 1.")
+    parser.add_argument(
+        "-q", "--buffer-order", type=int, default=26,
+        help="Specify FFT buffer order, N = 2**q")
+    parser.add_argument(
+        "-r", "--resolution", type=int, default=16,
+        help="Specify desired timing resolution, in units of ns.")
     parser.add_argument(
         "-s", "--separation", type=int, default=6,
         help="Specify width of separation, in units of epochs.")
     parser.add_argument(
-        "-q", "--buffer-order", type=int, default=20,
-        help="Specify FFT buffer order, N = 2**q")
-    parser.add_argument(
-        "-r", "--resolution", type=int, default=1,
-        help="Specify desired timing resolution, in integer units of ns.")
-    parser.add_argument(
         "-S", "--threshold", type=float, default=6,
         help="Specify the statistical significance threshold.")
-    parser.add_argument(
-        "-k", "--skip-epochs", type=int, default=0,
-        help="Specify number of skip epochs")
     # fmt: on
     args = parser.parse_args()
     logger.debug("%s", args)
@@ -391,9 +322,11 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    first_epoch = args.first_epoch
-    skip_epoch = args.skip_epochs
-    num_of_epochs = args.num_epochs
+    # first_epoch = args.first_epoch
+    # skip_epoch = args.skip_epochs
+    # num_of_epochs = args.num_epochs
+    skip_epoch = 0
+    num_of_epochs = args.resolution * (1 << args.buffer_order) / (1 << 29)
     separation_width = args.separation
 
     # fmt: off
@@ -412,36 +345,45 @@ def main():
         ta = read_a1(args.target, legacy=True)[0]
         tb = read_a1(args.reference, legacy=True)[0]
         # TODO: Parse ta[0] as epoch value then split from there
-        offset_start = skip_epoch*EPOCH_LENGTH
-        offset_end = offset_start + num_of_epochs*EPOCH_LENGTH
-        offset_start_wsep = offset_start + (separation_width*num_of_epochs)*EPOCH_LENGTH
-        offset_end_wsep = offset_start_wsep + num_of_epochs*EPOCH_LENGTH
+        # offset_start = skip_epoch*EPOCH_LENGTH
+        # offset_end = offset_start + num_of_epochs*EPOCH_LENGTH
+        # offset_start_wsep = offset_start + (separation_width*num_of_epochs)*EPOCH_LENGTH
+        # offset_end_wsep = offset_start_wsep + num_of_epochs*EPOCH_LENGTH
+        # print(offset_start, offset_end, offset_start_wsep, offset_end_wsep)
         # Ignore first epoch
-        ta0 = ta - ta[0]; tb0 = tb - tb[0]
-        alice = ta[
-            ((ta0 >= offset_start) & (ta0 <= offset_end)) |
-            ((ta0 >= offset_start_wsep) & (ta0 <= offset_end_wsep))
-        ]
-        bob = tb[
-            ((tb0 >= offset_start) & (tb0 <= offset_end)) |
-            ((tb0 >= offset_start_wsep) & (tb0 <= offset_end_wsep))
-        ]
+        # ta0 = ta - ta[0]; tb0 = tb - tb[0]
+        alice = ta
+        # alice = ta[
+        #     ((ta0 >= offset_start) & (ta0 <= offset_end)) |
+        #     ((ta0 >= offset_start_wsep) & (ta0 <= offset_end_wsep))
+        # ]
+        bob = tb
+        # bob = tb[
+        #     ((tb0 >= offset_start) & (tb0 <= offset_end)) |
+        #     ((tb0 >= offset_start_wsep) & (tb0 <= offset_end_wsep))
+        # ]
         logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
 
     else:
         logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
         sys.exit(1)
 
-    # TODO: Change this, avoid modifying globals...
-    global S_th, Ta, Ts, delta_tmax, N
-    delta_tmax = args.resolution
     Ta = num_of_epochs * EPOCH_LENGTH
-    N = 2 ** args.buffer_order
-    S_th = args.threshold
-    Ts = separation_width * Ta
+    DELTA_U_MAX = 0
+    DELTA_U_STEP = 1e-6
+    bob = bob * (1 + 50e-9)
 
     logger.debug("Triggered fpfind main routine.")
-    td, fd = fpfind(bob, alice)
+    td, fd = fpfind(
+        alice, bob,
+        num_wraps=args.num_wraps,
+        num_bins=(1 << args.buffer_order),
+        separation_duration=separation_width * Ta,  # Ts
+        threshold=args.threshold,
+        resolution=args.resolution,
+        precompensation_step=DELTA_U_STEP,
+        precompensation_max=DELTA_U_MAX,
+    )
     print(fd)
     # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
 

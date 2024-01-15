@@ -9,3 +9,5 @@ class TSRES(enum.Enum):
     NS1 = 1
     PS125 = 8
     PS4 = 256
+
+EPOCH_LENGTH = 1 << 29
