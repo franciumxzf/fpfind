@@ -3,6 +3,8 @@ code/data
 data
 data_win
 src/fpfind/freqcd_path
+temp
+tmp
 
 # Compiled python files
 **/__pycache__
