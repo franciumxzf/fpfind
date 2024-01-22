@@ -85,12 +85,11 @@ def profile(f):
 @profile
 def time_freq(
         ats, bts,
-        num_wraps, resolution, num_bins, threshold, separation_duration,
+        num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
     ):
     """Perform """
     # TODO: Be careful of slice timestamps
     # BOOKKEEPING
-    target_resolution = resolution
     start_time = 0
     duration = num_wraps * resolution * num_bins
 
@@ -215,7 +214,7 @@ def time_freq(
 @profile
 def fpfind(alice, bob,
            num_wraps,
-        num_bins, separation_duration, threshold, resolution,
+        num_bins, separation_duration, threshold, resolution, target_resolution,
         precompensations):
     """Performs fpfind procedure.
 
@@ -245,7 +244,7 @@ def fpfind(alice, bob,
         f = 1 + df0
         dt1, df1 = time_freq(
             alice, (bob - dt)/f,
-            num_wraps, resolution, num_bins, threshold, separation_duration,
+            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
         )
 
         # Refine estimates, using the same recursive relations
@@ -255,7 +254,7 @@ def fpfind(alice, bob,
         logger.debug("Applying another %.3f ppm compensation.", df1*1e6)
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
-            num_wraps, resolution, num_bins, threshold, separation_duration,
+            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
         )
 
         # If frequency compensation successful, the subsequent correction
@@ -267,11 +266,11 @@ def fpfind(alice, bob,
     while True:
         dt += f * dt2
         f *= (1 + df2)
-        if abs(df2) > 1e-10:
+        if abs(df2) <= 1e-10:
             break
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
-            num_wraps, resolution, num_bins, threshold, separation_duration,
+            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
         )
 
     df = f - 1
@@ -371,7 +370,10 @@ def main():
         "-q", "--buffer-order", metavar="", type=int, default=26,
         help="Specify FFT buffer order, N = 2**q (default: %(default)d)")
     pgroup_fpfind.add_argument(
-        "-r", "--resolution", metavar="", type=int, default=16,
+        "-R", "--initial-resolution", metavar="", type=int, default=16,
+        help="Specify initial timing resolution, in units of ns (default: %(default)dns)")
+    pgroup_fpfind.add_argument(
+        "-r", "--final-resolution", metavar="", type=int, default=1,
         help="Specify desired timing resolution, in units of ns (default: %(default)dns)")
     pgroup_fpfind.add_argument(
         "-s", "--separation", metavar="", type=float, default=6,
@@ -422,7 +424,7 @@ def main():
 
     # Verify minimum duration has been imported
     num_bins = (1 << args.buffer_order)
-    Ta = args.resolution * num_bins * args.num_wraps
+    Ta = args.initial_resolution * num_bins * args.num_wraps
     Ts = args.separation * Ta
     minimum_duration = (args.separation + 1) * Ta
     logger.debug("fpfind parameters:")
@@ -506,7 +508,8 @@ def main():
         num_bins=num_bins,
         separation_duration=Ts,
         threshold=args.threshold,
-        resolution=args.resolution,
+        resolution=args.initial_resolution,
+        target_resolution=args.final_resolution,
         precompensations=precompensations,
     )
 
