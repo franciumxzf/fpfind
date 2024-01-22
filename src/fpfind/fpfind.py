@@ -101,7 +101,6 @@ def time_freq(
 
     # Quit if df is near zero, i.e. no need to correct
     dt = 0
-    df1 = 0
     f = 1
     curr_iteration = 1
     while True:
@@ -173,29 +172,44 @@ def time_freq(
         xs = np.arange(num_bins) * resolution
         dt1 = get_timing_delay_fft(ys, xs)[0]
         _dt1 = get_timing_delay_fft(_ys, xs)[0]
+
+        # Apply recursive relations
+        #   A quick proof (note dt -> t):
+        #     iter 0 ->  (T - t0)/f0          = T/f0    - (t0/f0)
+        #     iter 1 -> ((T - t0)/f0 - t1)/f1 = T/f0/f1 - (t0/f0/f1 + t1/f1)
+        #   We want:
+        #     iter n ->  (T - t)/f            = T/f     - t/f
+        #   Thus:
+        #     f = f0 * f1 * ... * fn
+        #     t = f * (t0/f0/f1/.../fn + t1/f1/.../fn + ... + tn/fn)
+        #       = t0 + t1*f0 + t2*f0*f1 + ... + tn*f0*f1*...*(fn-1)
+        #   Recursive relation:
+        #     f' = f * fn
+        #     t' = f * tn + t,  i.e. use old value of f
+        dt += f * dt1
+        df1 = (_dt1 - dt1) / separation_duration
+        f  *= (1 + df1)
         logger.debug("  Calculate timing delays")
         logger.debug("    early dt = %.0f ns", dt1)
         logger.debug("    late  dt = %.0f ns", _dt1)
-
-        # dt = dt / (1 + df1) + dt1  # update with old frequency. TODO: Verify.
-        df1 = (_dt1 - dt1) / separation_duration
         logger.debug("    current df = %.3f ppm", df1 * 1e6)
-        # TODO: Short-circuit later xcorr if frequency difference is already zero, but need to be careful when array is flatlined
-        dt = (dt + dt1) / (1 + df1)
-        f *= 1 / (1 + df1)
-
+        logger.debug("    accumulated dt = %.0f ns", dt)
+        logger.debug("    accumulated df = %.3f ppm", (f - 1) * 1e6)
+        
         # Stop if resolution met, otherwise refine resolution
         if resolution <= target_resolution:
             break
 
+        # Update for next iteration
+        # TODO: Short-circuit later xcorr if frequency difference is already zero, but need to be careful when array is flatlined
+        bts = (bts - dt1) / (1 + df1)
         resolution = resolution / (separation_duration / duration / np.sqrt(2))
-        bts = (bts - dt1) / (1 + df1)  # update from current run
         curr_iteration += 1
 
-    df = 1 / f - 1
-    logger.debug("Final calculated result:")
-    logger.debug("  dt = %.0f ns", dt)
-    logger.debug("  df = %.3f ppm", df * 1e6)
+    df = f - 1
+    logger.debug("Final result:")
+    logger.debug("  accumulated dt = %.0f ns", dt)
+    logger.debug("  accumulated df = %.3f ppm", (f - 1) * 1e6)
     return dt, df
 
 @profile
@@ -227,27 +241,40 @@ def fpfind(alice, bob,
         logger.debug("Applying %.3f ppm precompensation.", df0*1e6)
 
         # Apply frequency precompensation df0
-        # TODO: CONTINUE
-        df = df0
-        # TODO: The frequency compensation needs to be normalized to start time before applying! Better I set the reference all the way in the beginning, then no need to keep slicing up the timestamps.
-        dt, df1 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
+        dt = 0
+        f = 1 + df0
+        dt1, df1 = time_freq(
+            alice, (bob - dt)/f,
+            num_wraps, resolution, num_bins, threshold, separation_duration,
+        )
 
-        # Apply additional frequency compensation
-        df = (1 + df) * (1 + df1) - 1
-        logger.debug("Applying %.3f ppm compensation.", df*1e6)
-        dt, df2 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
+        # Refine estimates, using the same recursive relations
+        # Try once more, with more gusto...!
+        dt += f * dt1
+        f *= (1 + df1)
+        logger.debug("Applying another %.3f ppm compensation.", df1*1e6)
+        dt2, df2 = time_freq(
+            alice, (bob - dt)/f,
+            num_wraps, resolution, num_bins, threshold, separation_duration,
+        )
 
         # If frequency compensation successful, the subsequent correction
         # will be smaller. Assume next correction less than 0.2ppm.
-        if abs(df2) <= abs(df1) and abs(df2) < 2e-7:
+        if abs(df2) <= abs(df1) and abs(df2) < 0.2e-6:
             break
 
     # Refine frequency estimation to +/-0.1ppb
-    df = (1 + df) * (1 + df2) - 1
-    while abs(df2) > 1e-10:
-        dt, df2 = time_freq(alice, bob / (1 + df), num_wraps, resolution, num_bins, threshold, separation_duration)
-        df = (1 + df) * (1 + df2) - 1
+    while True:
+        dt += f * dt2
+        f *= (1 + df2)
+        if abs(df2) > 1e-10:
+            break
+        dt2, df2 = time_freq(
+            alice, (bob - dt)/f,
+            num_wraps, resolution, num_bins, threshold, separation_duration,
+        )
 
+    df = f - 1
     return dt, df
 
 
