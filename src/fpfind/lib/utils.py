@@ -1,5 +1,6 @@
 import argparse
 import logging
+import pathlib
 import typing
 import warnings
 from typing import Optional
@@ -7,6 +8,39 @@ from dataclasses import dataclass
 
 import numpy as np
 import scipy
+
+from fpfind.lib.parse_epochs import (
+    epoch2int, int2epoch, read_T1, read_T2,
+)
+
+inbuilt_round = round
+def round(number, ndigits=None, sf=None, dp=None):
+    """Stand-in replacement for in-built round, adapted from [1].
+    
+    Signature of in-build round is (number, ndigits=None). The 'dp' keyword
+    is introduced as an alias to 'ndigits', as a counterpart to the 'sf'
+    keyword representing the number of significant figures to use.
+
+    Only one of the precision arguments, i.e. 'ndigits', 'sf', 'dp', should
+    be supplied, otherwise the behaviour will be undefined.
+
+    References:
+        [1]: Original source, https://stackoverflow.com/a/48812729
+    """
+    # 'dp' overrides 'ndigits' keyword
+    if ndigits is not None and dp is None:
+        dp = ndigits
+    
+    # Assume regular rounding behaviour if 'sf' not supplied
+    if sf is None:
+        return inbuilt_round(number, dp)
+    
+    # Perform rounding
+    intermediate = float('{:.{p}g}'.format(number, p=sf))
+    if isinstance(number, int):
+        return int(intermediate)  # preserve as int even when very large
+    return '{:.{p}g}'.format(intermediate, p=sf)
+
 
 def get_overlap(*arrays):
     """Returns right-truncated arrays of largest possible common length.
@@ -155,6 +189,8 @@ def generate_fft(
         This function is technically not cacheable due to the mutability of
         np.ndarray.
     """
+    if len(arr) == 0:
+        raise ValueError("Array is empty!")
     acq_start = arr[0] if acq_start is None else acq_start
     if duration is None:
         timespan = arr[-1] - arr[0]
@@ -344,18 +380,47 @@ class ArgparseCustomFormatter(argparse.HelpFormatter):
                     parts.append('%s' % option_string)
                 parts[-1] += ' %s'%args_string
             return ', '.join(parts)
-        
 
-def get_timestamp(dir_name, file_type, first_epoch, skip_epoch, num_of_epochs, sep):
-    epoch_dir = pathlib.Path(dir_name)
+
+def get_first_overlapping_epoch(
+        dir1, dir2, first_epoch=None, return_length=False,
+    ):
+    """Get epoch name of smallest overlapping epoch.
+    
+    If 'return_length' is True, the return value is a tuple of the epoch name
+    and the number of continguous overlapping epochs starting from said epoch.
+    """
+    epochints1 = [epoch2int(fp.name) for fp in pathlib.Path(dir1).glob("*")]
+    epochints2 = [epoch2int(fp.name) for fp in pathlib.Path(dir2).glob("*")]
+    epochints = set(epochints1).intersection(epochints2)
+    
+    # Exclude epochs smaller than 'first_epoch', if supplied
+    if first_epoch is not None:
+        epochint_first = epoch2int(first_epoch)
+        epochints = set([v for v in epochints if v >= epochint_first])
+    
+    # Calculate number of overlapping epochs
+    if len(epochints) == 0:
+        min_epoch = None
+        num_epochs = 0
+    else:
+        min_epochint = min(epochints)
+        min_epoch = int2epoch(min_epochint)
+        num_epochs = 1
+        while (min_epochint + num_epochs) in epochints:
+            num_epochs += 1
+    
+    # Return result
+    if return_length:
+        return min_epoch, num_epochs
+    return min_epoch
+
+
+def get_timestamp(dirname, file_type, first_epoch, skip_epoch, num_of_epochs):
+    epochdir = pathlib.Path(dirname)
     timestamp = np.array([], dtype=np.float128)
-    for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + i)
+    for i in range(num_of_epochs):
+        epoch_name = epochdir / int2epoch(epoch2int(first_epoch) + skip_epoch + i)
         reader = read_T1 if file_type == "T1" else read_T2
-        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
-
-    for i in range(num_of_epochs + 1):
-        epoch_name = epoch_dir / int2epoch(epoch2int(first_epoch) + skip_epoch + sep * num_of_epochs + i)
-        reader = read_T1 if file_type == "T1" else read_T2
-        timestamp = np.append(timestamp, reader(epoch_name)[0])  # TODO
+        timestamp = np.append(timestamp, reader(epoch_name)[0])
     return timestamp

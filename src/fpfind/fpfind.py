@@ -22,7 +22,7 @@ from fpfind.lib.utils import round, generate_fft, get_timing_delay_fft, slice_ti
 
 from fpfind.lib.utils import (
     ArgparseCustomFormatter, LoggingCustomFormatter,
-    get_timestamp,
+    get_timestamp, get_first_overlapping_epoch,
 )
 from fpfind.lib.constants import (
     EPOCH_LENGTH,
@@ -30,7 +30,6 @@ from fpfind.lib.constants import (
 
 # Setup logging mechanism
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 if not logger.handlers:
     handler = logging.StreamHandler(stream=sys.stderr)
     handler.setFormatter(
@@ -88,6 +87,7 @@ def time_freq(
         ats, bts,
         num_wraps, resolution, num_bins, threshold, separation_duration,
     ):
+    """Perform """
     # TODO: Be careful of slice timestamps
     # BOOKKEEPING
     target_resolution = resolution
@@ -131,7 +131,6 @@ def time_freq(
         afft = generate_fft(
             slice_timestamps(ats, start_time, duration),
             num_bins, resolution)
-
         bfft = generate_fft(
             slice_timestamps(bts, start_time, duration),
             num_bins, resolution)
@@ -154,12 +153,6 @@ def time_freq(
             logger.debug("    Doubling resolution to %.0f ns", resolution)
             if resolution > 5e6:
                 raise ValueError("Number of bins too little.")
-
-        # Check significance, lower than threshold, likely wrong
-        stats = get_statistics(ys, resolution)
-        if stats.significance < threshold:
-            logger.warning("TODO")
-            break
 
         # Later cross-correlation
         logger.debug(
@@ -303,7 +296,7 @@ def main():
         "-h", "--help", action="store_true",
         help="Show this help message and exit")
     pgroup_config.add_argument(
-        "-v", "--verbose", action="count", default=0,
+        "-v", "--verbosity", action="count", default=0,
         help="Specify debug verbosity, e.g. -vv for more verbosity")
     pgroup_config.add_argument(
         "--quiet", action="store_true",
@@ -319,10 +312,10 @@ def main():
     pgroup_ts = parser.add_argument_group("importing timestamps")
     pgroup_ts.add_argument(
         "-t", "--target", metavar="",
-        help="Low-count side timestamp file")
+        help="Low-count side timestamp file, in 'a1' format")
     pgroup_ts.add_argument(
         "-T", "--reference", metavar="",
-        help="High-count side timestamp file (reference)")
+        help="High-count side timestamp file, in 'a1' format (reference)")
     pgroup_ts.add_argument(
         "-X", "--legacy", action="store_true",
         help="Parse raw timestamps in legacy mode (default: %(default)s)")
@@ -337,7 +330,10 @@ def main():
         help="T1FILES (reference)")
     pgroup_ep.add_argument(
         "-e", "--first-epoch", metavar="",
-        help="Specify first overlapping epoch between the two remotes")
+        help="Specify filename of first overlapping epoch, optional")
+    pgroup_ep.add_argument(
+        "-z", "--skip", metavar="", type=int, default=0,
+        help="Specify number of initial epochs to skip (default: %(default)d)")
     
     # fpfind parameters
     pgroup_fpfind = parser.add_argument_group("fpfind parameters")
@@ -357,8 +353,13 @@ def main():
         "-S", "--threshold", metavar="", type=float, default=6,
         help="Specify the statistical significance threshold (default: %(default).1f)")
     pgroup_fpfind.add_argument(
-        "-V", "--verbosity", metavar="", type=int, default=0,
-        help="Specify output verbosity (default: %(default)d)")
+        "-V", "--output", metavar="", type=int, default=0, choices=[0,1],
+        help="Specify output verbosity, tab-delimited results: "
+            "0 = freq (abs) / "
+            "1 = freq (2^-34) / "
+            "2 = freq (abs) + time (ns) / "
+            "3 = freq (2^-34) + time (ns) "
+            "(default: %(default)d)")
     
     # Frequency pre-compensation parameters
     pgroup_precomp = parser.add_argument_group("frequency precompensation")
@@ -386,33 +387,60 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    # Log arguments
+    # Set logging level and log arguments
+    levels = [logging.WARNING, logging.INFO, logging.DEBUG]
+    args.verbosity = min(args.verbosity, len(levels)-1)
+    logger.setLevel(levels[args.verbosity])
     logger.debug("%s", args)
 
-    skip_epoch = 0
-    Ta = args.resolution * (1 << args.buffer_order)
-    num_of_epochs = Ta / (1 << 29)
-    separation_width = args.separation
-
-    logger.debug("xcorr duration = %.1f s", Ta * 1e-9)
-    logger.debug("Total required duration = %.1f s", (separation_width + 1) * Ta * 1e-9)
+    # Verify minimum duration has been imported
+    num_bins = (1 << args.buffer_order)
+    Ta = args.resolution * num_bins * args.num_wraps
+    Ts = args.separation * Ta
+    minimum_duration = (args.separation + 1) * Ta
+    logger.debug("fpfind parameters:")
+    logger.debug("  Cross-correlation duration = %.1fs", Ta * 1e-9)
+    logger.debug("  Minimum required duration: %.1fs", minimum_duration * 1e-9)
 
     # fmt: off
 
-    # alice: low count side - chopper - HeadT2 - sendfiles
-    # bob: high count side - chopper2 - HeadT1 - t1files
-
+    # Obtain timestamps needed for fpfind
+    #   alice: low count side - chopper - HeadT2 - sendfiles
+    #   bob: high count side - chopper2 - HeadT1 - t1files
     logger.debug("Processing timestamps")
     if args.sendfiles is not None and args.t1files is not None:
-        logger.debug("Reading from directories.")
-        alice = get_timestamp(args.sendfiles, 'T2', first_epoch, skip_epoch, num_of_epochs, separation_width)
-        bob = get_timestamp(args.t1files, 'T1', first_epoch, skip_epoch, num_of_epochs, separation_width)
+        logger.debug("Reading from epoch directories.")
+
+        # +1 epoch specified for use as buffer for frequency compensation
+        required_epochs = np.ceil(minimum_duration/EPOCH_LENGTH).astype(np.int32) + args.skip + 1
+
+        # Automatically choose first overlapping epoch if not supplied manually
+        first_epoch, available_epochs = get_first_overlapping_epoch(
+            args.sendfiles, args.t1files,
+            first_epoch=args.first_epoch, return_length=True,
+        )
+        logger.debug("  First epoch = %s", first_epoch)
+        logger.debug("  Available epochs = %d", available_epochs)
+        logger.debug("  Reading %d epochs", required_epochs - args.skip)
+
+        if available_epochs < required_epochs:
+            logger.warning(
+                "Insufficient epochs: Need %d epochs, got %d",
+                required_epochs, available_epochs,
+            )
+
+        # Read epochs
+        alice = get_timestamp(
+            args.sendfiles, "T2",
+            first_epoch, args.skip, required_epochs-args.skip)
+        bob = get_timestamp(
+            args.t1files, "T1",
+            first_epoch, args.skip, required_epochs-args.skip)
 
     elif args.target is not None and args.reference is not None:
         logger.debug("Reading from timestamp files.")
         alice = read_a1(args.target, legacy=args.legacy)[0]
         bob = read_a1(args.reference, legacy=args.legacy)[0]
-        logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
 
     else:
         logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
@@ -424,6 +452,11 @@ def main():
     alice = slice_timestamps(alice, start_time)
     bob = slice_timestamps(bob, start_time)
 
+    logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
+    logger.debug("Timestamp durations:")
+    logger.debug("  Alice: %ss", round((alice[-1]) * 1e-9, 2))
+    logger.debug("  Bob: %ss", round((bob[-1]) * 1e-9, 2))
+    
     # Prepare frequency pre-compensations
     precompensations = [0]
     if args.precomp_enable:
@@ -443,15 +476,26 @@ def main():
     td, fd = fpfind(
         alice, bob,
         num_wraps=args.num_wraps,
-        num_bins=(1 << args.buffer_order),
-        separation_duration=separation_width * Ta,  # Ts
+        num_bins=num_bins,
+        separation_duration=Ts,
         threshold=args.threshold,
         resolution=args.resolution,
         precompensations=precompensations,
     )
-    print(fd)
-    # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
 
+    # Vary output depending output verbosity value
+    fd_freqcd = f"{round(fd * (1 << 34)):d}"
+    td_freqcd = f"{round(td):d}"
+    if args.output == 0:
+        print(f"{fd}\n")
+    elif args.output == 1:
+        print(f"{fd_freqcd}\n")
+    elif args.output == 2:
+        print(f"{fd}\t{td_freqcd}\n")
+    elif args.output == 3:
+        print(f"{fd_freqcd}\t{td_freqcd}\n")
+    else:
+        logger.error("Unknown verbosity - should not happen")
 
 if __name__ == "__main__":
     main()
