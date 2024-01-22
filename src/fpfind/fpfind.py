@@ -211,6 +211,8 @@ def fpfind(alice, bob,
         num_bins, separation_duration, threshold, resolution,
         precompensations):
     """Performs fpfind procedure.
+
+    'alice' and 'bob' must have starting timestamps zeroed.
     
     Args:
         alice: Reference timestamps, in 'a1X' format.
@@ -289,95 +291,104 @@ def main():
         default_config_files=[f"{script_name}.default.conf"],
         description=__doc__.partition("Changelog:")[0],
         formatter_class=ArgparseCustomFormatter,
+        add_help=False,
     )
-
-    # Remove metavariable name, by method injection. Makes for cleaner UI.
-    def _add_argument(*args, **kwargs):
-        kwargs.update(metavar="")
-        return parser._add_argument(*args, **kwargs)
-
-    parser._add_argument = parser.add_argument
-    parser.add_argument = _add_argument
 
     # Disable Black formatting
     # fmt: off
-    parser.add_argument(
-        "--config", is_config_file_arg=True,
-        help="Path to configuration file")
-    parser.add_argument(
-        "--save", is_write_out_config_file_arg=True,
-        help="Path to configuration file for saving, then immediately exit")
-    parser._add_argument(
-        "--quiet", action="store_true",
-        help="Suppress errors, but will not block logging")
-    parser._add_argument(
+
+    # Display arguments (group with defaults)
+    pgroup_config = parser.add_argument_group("display/configuration")
+    pgroup_config.add_argument(
+        "-h", "--help", action="store_true",
+        help="Show this help message and exit")
+    pgroup_config.add_argument(
         "-v", "--verbose", action="count", default=0,
         help="Specify debug verbosity, e.g. -vv for more verbosity")
-    parser.add_argument(
-        "-d", "--sendfiles",
-        help="SENDFILES")
-    parser.add_argument(
-        "-D", "--t1files",
-        help="T1FILES (reference)")
-    parser.add_argument(
-        "-t", "--target",
+    pgroup_config.add_argument(
+        "--quiet", action="store_true",
+        help="Suppress errors, but will not block logging")
+    pgroup_config.add_argument(
+        "--config", metavar="", is_config_file_arg=True,
+        help="Path to configuration file")
+    pgroup_config.add_argument(
+        "--save", metavar="", is_write_out_config_file_arg=True,
+        help="Path to configuration file for saving, then immediately exit")
+    
+    # Timestamp importing arguments
+    pgroup_ts = parser.add_argument_group("importing timestamps")
+    pgroup_ts.add_argument(
+        "-t", "--target", metavar="",
         help="Low-count side timestamp file")
-    parser.add_argument(
-        "-T", "--reference",
+    pgroup_ts.add_argument(
+        "-T", "--reference", metavar="",
         help="High-count side timestamp file (reference)")
-    parser.add_argument(
-        "-V", "--verbosity", type=int,
-        help="Specify output verbosity")
-    parser.add_argument(
-        "-e", "--first-epoch",
+    pgroup_ts.add_argument(
+        "-X", "--legacy", action="store_true",
+        help="Parse raw timestamps in legacy mode (default: %(default)s)")
+    
+    # Epoch importing arguments
+    pgroup_ep = parser.add_argument_group("importing epochs")
+    pgroup_ep.add_argument(
+        "-d", "--sendfiles", metavar="",
+        help="SENDFILES")
+    pgroup_ep.add_argument(
+        "-D", "--t1files", metavar="",
+        help="T1FILES (reference)")
+    pgroup_ep.add_argument(
+        "-e", "--first-epoch", metavar="",
         help="Specify first overlapping epoch between the two remotes")
     
     # fpfind parameters
-    parser.add_argument(
-        "-k", "--num-wraps", type=int, default=1,
-        help="Specify number of arrays to wrap. Default 1.")
-    parser.add_argument(
-        "-q", "--buffer-order", type=int, default=26,
-        help="Specify FFT buffer order, N = 2**q")
-    parser.add_argument(
-        "-r", "--resolution", type=int, default=16,
-        help="Specify desired timing resolution, in units of ns.")
-    parser.add_argument(
-        "-s", "--separation", type=float, default=6,
-        help="Specify width of separation, in units of epochs.")
-    parser.add_argument(
-        "-S", "--threshold", type=float, default=6,
-        help="Specify the statistical significance threshold.")
+    pgroup_fpfind = parser.add_argument_group("fpfind parameters")
+    pgroup_fpfind.add_argument(
+        "-k", "--num-wraps", metavar="", type=int, default=1,
+        help="Specify number of arrays to wrap (default: %(default)d)")
+    pgroup_fpfind.add_argument(
+        "-q", "--buffer-order", metavar="", type=int, default=26,
+        help="Specify FFT buffer order, N = 2**q (default: %(default)d)")
+    pgroup_fpfind.add_argument(
+        "-r", "--resolution", metavar="", type=int, default=16,
+        help="Specify desired timing resolution, in units of ns (default: %(default)dns)")
+    pgroup_fpfind.add_argument(
+        "-s", "--separation", metavar="", type=float, default=6,
+        help="Specify width of separation, in units of epochs (default: %(default).1f)")
+    pgroup_fpfind.add_argument(
+        "-S", "--threshold", metavar="", type=float, default=6,
+        help="Specify the statistical significance threshold (default: %(default).1f)")
+    pgroup_fpfind.add_argument(
+        "-V", "--verbosity", metavar="", type=int, default=0,
+        help="Specify output verbosity (default: %(default)d)")
     
     # Frequency pre-compensation parameters
-    parser._add_argument(
+    pgroup_precomp = parser.add_argument_group("frequency precompensation")
+    pgroup_precomp.add_argument(
         "-P", "--precomp-enable", action="store_true",
-        help="Enable frequency pre-compensation scan.")
-    parser.add_argument(
-        "--precomp-start", type=float, default=0,
-        help="Specify the frequency precompensation starting value.")
-    parser.add_argument(
-        "--precomp-step", type=float, default=5e-6,
-        help="Specify the frequency precompensation step value.")
-    parser.add_argument(
-        "--precomp-stop", type=float, default=100e-6,
-        help="Specify the max frequency precompensation (from starting).")
+        help="Enable precompensation scanning")
+    pgroup_precomp.add_argument(
+        "--precomp-start", metavar="", type=float, default=0.0,
+        help="Specify the starting value (default: 0ppm)")
+    pgroup_precomp.add_argument(
+        "--precomp-step", metavar="", type=float, default=5e-6,
+        help="Specify the step value (default: 5ppm)")
+    pgroup_precomp.add_argument(
+        "--precomp-stop", metavar="", type=float, default=100e-6,
+        help="Specify the max scan range, one-sided (default: 100ppm)")
+
     # fmt: on
+    # Parse arguments
     args = parser.parse_args()
 
     # Check whether options have been supplied, and print help otherwise
     args_sources = parser.get_source_to_settings_dict().keys()
     config_supplied = any(map(lambda x: x.startswith("config_file"), args_sources))
-    if len(sys.argv) == 1 and not config_supplied:
+    if args.help or (len(sys.argv) == 1 and not config_supplied):
         parser.print_help(sys.stderr)
         sys.exit(1)
 
     # Log arguments
     logger.debug("%s", args)
 
-    # first_epoch = args.first_epoch
-    # skip_epoch = args.skip_epochs
-    # num_of_epochs = args.num_epochs
     skip_epoch = 0
     Ta = args.resolution * (1 << args.buffer_order)
     num_of_epochs = Ta / (1 << 29)
@@ -399,53 +410,21 @@ def main():
 
     elif args.target is not None and args.reference is not None:
         logger.debug("Reading from timestamp files.")
-        ta = read_a1(args.target, legacy=True)[0]
-        tb = read_a1(args.reference, legacy=True)[0]
-        # ta = read_a1(args.target, legacy=False)[0]
-        # tb = read_a1(args.reference, legacy=False)[0]
-        # TODO: Parse ta[0] as epoch value then split from there
-        # offset_start = skip_epoch*EPOCH_LENGTH
-        # offset_end = offset_start + num_of_epochs*EPOCH_LENGTH
-        # offset_start_wsep = offset_start + (separation_width*num_of_epochs)*EPOCH_LENGTH
-        # offset_end_wsep = offset_start_wsep + num_of_epochs*EPOCH_LENGTH
-        # print(offset_start, offset_end, offset_start_wsep, offset_end_wsep)
-        # Ignore first epoch
-        # ta0 = ta - ta[0]; tb0 = tb - tb[0]
-        alice = ta
-        # alice = ta[
-        #     ((ta0 >= offset_start) & (ta0 <= offset_end)) |
-        #     ((ta0 >= offset_start_wsep) & (ta0 <= offset_end_wsep))
-        # ]
-        bob = tb
-        # bob = tb[
-        #     ((tb0 >= offset_start) & (tb0 <= offset_end)) |
-        #     ((tb0 >= offset_start_wsep) & (tb0 <= offset_end_wsep))
-        # ]
+        alice = read_a1(args.target, legacy=args.legacy)[0]
+        bob = read_a1(args.reference, legacy=args.legacy)[0]
         logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
 
     else:
         logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
         sys.exit(1)
 
-    #Ta = num_of_epochs * EPOCH_LENGTH
-    DELTA_U_MAX = 0
-    DELTA_U_STEP = 1e-6
-    # bob = bob * (1 + 50e-9)
-    # bob = bob[1:]
-    # bob = bob * (1 - 100e-6)
-
-    # Normalize to common time reference near start, so that
+    # Normalize timestamps to common time reference near start, so that
     # frequency compensation will not shift the timing difference too far
     start_time = max(alice[0], bob[0])
     alice = slice_timestamps(alice, start_time)
     bob = slice_timestamps(bob, start_time)
 
-    # Apply a frequency adjustment
-    f = -30e-6
-    bob = bob * (1 + f)
-    globals().update(locals())
-
-    # Prepare pre-compensations
+    # Prepare frequency pre-compensations
     precompensations = [0]
     if args.precomp_enable:
         precompensations = generate_precompensations(
