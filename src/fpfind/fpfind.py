@@ -209,7 +209,7 @@ def time_freq(
 def fpfind(alice, bob,
            num_wraps,
         num_bins, separation_duration, threshold, resolution,
-        precompensation_max, precompensation_step):
+        precompensations):
     """Performs fpfind procedure.
     
     Args:
@@ -225,13 +225,7 @@ def fpfind(alice, bob,
     # Generating frequency precompensation values,
     # e.g. for 10ppm, the sequence of values are:
     # 0ppm, 10ppm, -10ppm, 20ppm, -20ppm, ...
-    df0s = np.arange(1, int(precompensation_max // precompensation_step + 1) * 2) // 2
-    df0s[::2] *= -1
-    df0s = df0s.astype(np.float64) * precompensation_step
-    logger.debug(
-        "Prepared %d precompensation(s): %s... ppm",
-        len(df0s), ",".join(map(str,df0s[:3])),
-    )
+    df0s = precompensations
 
     # Go through all precompensations
     for df0 in df0s:
@@ -250,7 +244,7 @@ def fpfind(alice, bob,
 
         # If frequency compensation successful, the subsequent correction
         # will be smaller. Assume next correction less than 0.2ppm.
-        if abs(df2) < abs(df1) and abs(df2) < 2e-7:
+        if abs(df2) <= abs(df1) and abs(df2) < 2e-7:
             break
 
     # Refine frequency estimation to +/-0.1ppb
@@ -260,6 +254,32 @@ def fpfind(alice, bob,
         df = (1 + df) * (1 + df2) - 1
 
     return dt, df
+
+
+def generate_precompensations(start, stop, step) -> list:
+    """Returns set of precompensations to apply before fpfind.
+
+    The precompensations are in alternating positive/negative to allow
+    scanning.
+    
+    Examples:
+        >>> generate_precompensations(0, 0, 0)
+        [0]
+        >>> generate_precompensations(1, 10, 5)
+        [1, 6, -4, 11, -9]
+        >>> generate_precompensations(1, 1, 5)
+        [1, 6, -4]
+    """
+    # Zero precompensation if invalid step supplied
+    if step == 0:
+        return [0]
+
+    # Prepare pre-compensations
+    df0s = np.arange(1, int(stop // step + 1) * 2) // 2
+    df0s[::2] *= -1
+    df0s = df0s.astype(np.float64) * step
+    df0s = df0s + start
+    return df0s
 
 
 # fmt: on
@@ -328,9 +348,22 @@ def main():
     parser.add_argument(
         "-S", "--threshold", type=float, default=6,
         help="Specify the statistical significance threshold.")
+    
+    # Frequency pre-compensation parameters
+    parser._add_argument(
+        "-P", "--precomp-enable", action="store_true",
+        help="Enable frequency pre-compensation scan.")
+    parser.add_argument(
+        "--precomp-start", type=float, default=0,
+        help="Specify the frequency precompensation starting value.")
+    parser.add_argument(
+        "--precomp-step", type=float, default=5e-6,
+        help="Specify the frequency precompensation step value.")
+    parser.add_argument(
+        "--precomp-stop", type=float, default=100e-6,
+        help="Specify the max frequency precompensation (from starting).")
     # fmt: on
     args = parser.parse_args()
-    logger.debug("%s", args)
 
     # Check whether options have been supplied, and print help otherwise
     args_sources = parser.get_source_to_settings_dict().keys()
@@ -338,6 +371,9 @@ def main():
     if len(sys.argv) == 1 and not config_supplied:
         parser.print_help(sys.stderr)
         sys.exit(1)
+
+    # Log arguments
+    logger.debug("%s", args)
 
     # first_epoch = args.first_epoch
     # skip_epoch = args.skip_epochs
@@ -405,12 +441,25 @@ def main():
     bob = slice_timestamps(bob, start_time)
 
     # Apply a frequency adjustment
-    # f = -30e-6
-    # bob = bob * (1 + f)
+    f = -30e-6
+    bob = bob * (1 + f)
     globals().update(locals())
 
-    
+    # Prepare pre-compensations
+    precompensations = [0]
+    if args.precomp_enable:
+        precompensations = generate_precompensations(
+            args.precomp_start,
+            args.precomp_stop,
+            args.precomp_step,
+        )
+        logger.debug(
+            "Prepared %d precompensation(s): %s... ppm",
+            len(precompensations),
+            ",".join(map(lambda p: f"{p:g}", precompensations[:3])),
+        )
 
+    # Start fpfind
     logger.debug("Triggered fpfind main routine.")
     td, fd = fpfind(
         alice, bob,
@@ -419,8 +468,7 @@ def main():
         separation_duration=separation_width * Ta,  # Ts
         threshold=args.threshold,
         resolution=args.resolution,
-        precompensation_step=DELTA_U_STEP,
-        precompensation_max=DELTA_U_MAX,
+        precompensations=precompensations,
     )
     print(fd)
     # print(f"{round(td):d}\t{round(fd * (1 << 34)):d}\n")
