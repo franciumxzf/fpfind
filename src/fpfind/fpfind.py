@@ -25,7 +25,7 @@ from fpfind.lib.utils import (
     get_timestamp, get_first_overlapping_epoch,
 )
 from fpfind.lib.constants import (
-    EPOCH_LENGTH,
+    EPOCH_LENGTH, MAX_FCORR,
 )
 
 # Setup logging mechanism
@@ -199,6 +199,10 @@ def time_freq(
         if resolution <= target_resolution:
             break
 
+        # Throw error if compensation does not fall within bounds
+        if abs(f - 1) >= MAX_FCORR:
+            raise ValueError("Compensation frequency diverged")
+
         # Update for next iteration
         # TODO: Short-circuit later xcorr if frequency difference is already zero, but need to be careful when array is flatlined
         bts = (bts - dt1) / (1 + df1)
@@ -242,10 +246,14 @@ def fpfind(alice, bob,
         # Apply frequency precompensation df0
         dt = 0
         f = 1 + df0
-        dt1, df1 = time_freq(
-            alice, (bob - dt)/f,
-            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
-        )
+        try:
+            dt1, df1 = time_freq(
+                alice, (bob - dt)/f,
+                num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
+            )
+        except ValueError as e:
+            logger.debug("ValueError: %s", e)
+            continue
 
         # Refine estimates, using the same recursive relations
         # Try once more, with more gusto...!
@@ -261,6 +269,10 @@ def fpfind(alice, bob,
         # will be smaller. Assume next correction less than 0.2ppm.
         if abs(df2) <= abs(df1) and abs(df2) < 0.2e-6:
             break
+
+    # No appropriate frequency compensation found
+    else:
+        raise ValueError("No peak found!")  # TODO
 
     # Refine frequency estimation to +/-0.1ppb
     while True:
@@ -382,7 +394,7 @@ def main():
         "-S", "--threshold", metavar="", type=float, default=6,
         help="Specify the statistical significance threshold (default: %(default).1f)")
     pgroup_fpfind.add_argument(
-        "-V", "--output", metavar="", type=int, default=0, choices=[0,1],
+        "-V", "--output", metavar="", type=int, default=0, choices=range(4),
         help="Specify output verbosity, tab-delimited results: "
             "0 = freq (abs) / "
             "1 = freq (2^-34) / "
