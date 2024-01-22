@@ -342,6 +342,9 @@ def main():
     pgroup_ts.add_argument(
         "-X", "--legacy", action="store_true",
         help="Parse raw timestamps in legacy mode (default: %(default)s)")
+    pgroup_ts.add_argument(
+        "-Z", "--skip-duration", metavar="", type=float, default=0,
+        help="Specify initial duration to skip, in seconds (default: %(default)s)")
 
     # Epoch importing arguments
     pgroup_ep = parser.add_argument_group("importing epochs")
@@ -355,7 +358,7 @@ def main():
         "-e", "--first-epoch", metavar="",
         help="Specify filename of first overlapping epoch, optional")
     pgroup_ep.add_argument(
-        "-z", "--skip", metavar="", type=int, default=0,
+        "-z", "--skip-epochs", metavar="", type=int, default=0,
         help="Specify number of initial epochs to skip (default: %(default)d)")
 
     # fpfind parameters
@@ -367,11 +370,11 @@ def main():
         "-q", "--buffer-order", metavar="", type=int, default=26,
         help="Specify FFT buffer order, N = 2**q (default: %(default)d)")
     pgroup_fpfind.add_argument(
-        "-R", "--initial-resolution", metavar="", type=int, default=16,
-        help="Specify initial timing resolution, in units of ns (default: %(default)dns)")
+        "-R", "--initial-res", metavar="", type=int, default=16,
+        help="Specify initial coarse timing resolution, in units of ns (default: %(default)dns)")
     pgroup_fpfind.add_argument(
-        "-r", "--final-resolution", metavar="", type=int, default=1,
-        help="Specify desired timing resolution, in units of ns (default: %(default)dns)")
+        "-r", "--final-res", metavar="", type=int, default=1,
+        help="Specify desired fine timing resolution, in units of ns (default: %(default)dns)")
     pgroup_fpfind.add_argument(
         "-s", "--separation", metavar="", type=float, default=6,
         help="Specify width of separation, in units of epochs (default: %(default).1f)")
@@ -419,7 +422,7 @@ def main():
 
     # Verify minimum duration has been imported
     num_bins = (1 << args.buffer_order)
-    Ta = args.initial_resolution * num_bins * args.num_wraps
+    Ta = args.initial_res * num_bins * args.num_wraps
     Ts = args.separation * Ta
     minimum_duration = (args.separation + 1) * Ta
     logger.debug("fpfind parameters:")
@@ -434,9 +437,10 @@ def main():
     logger.debug("Processing timestamps")
     if args.sendfiles is not None and args.t1files is not None:
         logger.debug("Reading from epoch directories.")
+        _is_reading_ts = False
 
         # +1 epoch specified for use as buffer for frequency compensation
-        required_epochs = np.ceil(minimum_duration/EPOCH_LENGTH).astype(np.int32) + args.skip + 1
+        required_epochs = np.ceil(minimum_duration/EPOCH_LENGTH).astype(np.int32) + args.skip_epochs + 1
 
         # Automatically choose first overlapping epoch if not supplied manually
         first_epoch, available_epochs = get_first_overlapping_epoch(
@@ -445,7 +449,7 @@ def main():
         )
         logger.debug("  First epoch = %s", first_epoch)
         logger.debug("  Available epochs = %d", available_epochs)
-        logger.debug("  Reading %d epochs", required_epochs - args.skip)
+        logger.debug("  Reading %d epochs", required_epochs - args.skip_epochs)
 
         if available_epochs < required_epochs:
             logger.warning(
@@ -456,13 +460,14 @@ def main():
         # Read epochs
         alice = get_timestamp(
             args.sendfiles, "T2",
-            first_epoch, args.skip, required_epochs-args.skip)
+            first_epoch, args.skip_epochs, required_epochs-args.skip_epochs)
         bob = get_timestamp(
             args.t1files, "T1",
-            first_epoch, args.skip, required_epochs-args.skip)
+            first_epoch, args.skip_epochs, required_epochs-args.skip_epochs)
 
     elif args.target is not None and args.reference is not None:
         logger.debug("Reading from timestamp files.")
+        _is_reading_ts = True
         alice = read_a1(args.target, legacy=args.legacy)[0]
         bob = read_a1(args.reference, legacy=args.legacy)[0]
 
@@ -473,6 +478,8 @@ def main():
     # Normalize timestamps to common time reference near start, so that
     # frequency compensation will not shift the timing difference too far
     start_time = max(alice[0], bob[0])
+    if _is_reading_ts:
+        start_time += args.skip_duration * 1e9  # convert to ns
     alice = slice_timestamps(alice, start_time)
     bob = slice_timestamps(bob, start_time)
 
@@ -503,8 +510,8 @@ def main():
         num_bins=num_bins,
         separation_duration=Ts,
         threshold=args.threshold,
-        resolution=args.initial_resolution,
-        target_resolution=args.final_resolution,
+        resolution=args.initial_res,
+        target_resolution=args.final_res,
         precompensations=precompensations,
     )
 
