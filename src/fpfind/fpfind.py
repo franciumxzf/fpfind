@@ -47,7 +47,7 @@ def profile(f):
 
     Modifies the logging facility to log the name and lineno of the function
     being called, instead of the usual encapsulating function.
-    
+
     Possibly thread-safe, but may not yield the correct indentation levels
     during execution, in that situation.
     """
@@ -145,7 +145,7 @@ def time_freq(
             if stats.significance >= threshold:
                 logger.debug("    Peak found, with resolution %.0f ns", resolution)
                 break
-            
+
             # Increase the bin width
             ys = np.sum(ys.reshape(-1, 2), axis = 1)
             resolution *= 2
@@ -195,7 +195,7 @@ def time_freq(
         logger.debug("    current df = %.3f ppm", df1 * 1e6)
         logger.debug("    accumulated dt = %.0f ns", dt)
         logger.debug("    accumulated df = %.3f ppm", (f - 1) * 1e6)
-        
+
         # Stop if resolution met, otherwise refine resolution
         if resolution <= target_resolution:
             break
@@ -220,7 +220,7 @@ def fpfind(alice, bob,
     """Performs fpfind procedure.
 
     'alice' and 'bob' must have starting timestamps zeroed.
-    
+
     Args:
         alice: Reference timestamps, in 'a1X' format.
         bob: Target timestamps, in 'a1X' format.
@@ -283,7 +283,7 @@ def generate_precompensations(start, stop, step) -> list:
 
     The precompensations are in alternating positive/negative to allow
     scanning.
-    
+
     Examples:
         >>> generate_precompensations(0, 0, 0)
         [0]
@@ -334,7 +334,7 @@ def main():
     pgroup_config.add_argument(
         "--save", metavar="", is_write_out_config_file_arg=True,
         help="Path to configuration file for saving, then immediately exit")
-    
+
     # Timestamp importing arguments
     pgroup_ts = parser.add_argument_group("importing timestamps")
     pgroup_ts.add_argument(
@@ -346,7 +346,7 @@ def main():
     pgroup_ts.add_argument(
         "-X", "--legacy", action="store_true",
         help="Parse raw timestamps in legacy mode (default: %(default)s)")
-    
+
     # Epoch importing arguments
     pgroup_ep = parser.add_argument_group("importing epochs")
     pgroup_ep.add_argument(
@@ -361,7 +361,7 @@ def main():
     pgroup_ep.add_argument(
         "-z", "--skip", metavar="", type=int, default=0,
         help="Specify number of initial epochs to skip (default: %(default)d)")
-    
+
     # fpfind parameters
     pgroup_fpfind = parser.add_argument_group("fpfind parameters")
     pgroup_fpfind.add_argument(
@@ -387,7 +387,7 @@ def main():
             "2 = freq (abs) + time (ns) / "
             "3 = freq (2^-34) + time (ns) "
             "(default: %(default)d)")
-    
+
     # Frequency pre-compensation parameters
     pgroup_precomp = parser.add_argument_group("frequency precompensation")
     pgroup_precomp.add_argument(
@@ -483,7 +483,7 @@ def main():
     logger.debug("Timestamp durations:")
     logger.debug("  Alice: %ss", round((alice[-1]) * 1e-9, 2))
     logger.debug("  Bob: %ss", round((bob[-1]) * 1e-9, 2))
-    
+
     # Prepare frequency pre-compensations
     precompensations = [0]
     if args.precomp_enable:
