@@ -19,9 +19,9 @@ from typing import NamedTuple
 import numpy as np
 
 from fpfind import TSRES
+from fpfind.lib.logging import get_logger
 
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__, level="warning")
 
 class HeadT1(NamedTuple):
     tag: int

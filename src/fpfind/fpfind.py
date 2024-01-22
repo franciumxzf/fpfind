@@ -8,7 +8,6 @@ Changelog:
 
 import inspect
 import functools
-import logging
 import os
 import sys
 import time
@@ -18,29 +17,15 @@ import configargparse
 import numpy as np
 
 from fpfind.lib.parse_timestamps import read_a1
-from fpfind.lib.utils import round, generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics
-
+from fpfind.lib.constants import EPOCH_LENGTH, MAX_FCORR
+from fpfind.lib.logging import get_logger, verbosity2level
 from fpfind.lib.utils import (
-    ArgparseCustomFormatter, LoggingCustomFormatter,
+    ArgparseCustomFormatter,
+    round, generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics,
     get_timestamp, get_first_overlapping_epoch,
 )
-from fpfind.lib.constants import (
-    EPOCH_LENGTH, MAX_FCORR,
-)
 
-# Setup logging mechanism
-logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(
-        LoggingCustomFormatter(
-            fmt="{asctime}\t{levelname:<7s}\t{funcName}:{lineno}\t| {message}",
-            datefmt="%Y%m%d_%H%M%S",
-            style="{",
-        )
-    )
-    logger.addHandler(handler)
-    logger.propagate = False
+logger = get_logger(__name__)
 
 def profile(f):
     """Performs a simple timing profile.
@@ -429,9 +414,7 @@ def main():
         sys.exit(1)
 
     # Set logging level and log arguments
-    levels = [logging.WARNING, logging.INFO, logging.DEBUG]
-    args.verbosity = min(args.verbosity, len(levels)-1)
-    logger.setLevel(levels[args.verbosity])
+    logger.setLevel(verbosity2level(args.verbosity))
     logger.debug("%s", args)
 
     # Verify minimum duration has been imported

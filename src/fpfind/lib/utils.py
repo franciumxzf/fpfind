@@ -16,7 +16,7 @@ from fpfind.lib.parse_epochs import (
 inbuilt_round = round
 def round(number, ndigits=None, sf=None, dp=None):
     """Stand-in replacement for in-built round, adapted from [1].
-    
+
     Signature of in-build round is (number, ndigits=None). The 'dp' keyword
     is introduced as an alias to 'ndigits', as a counterpart to the 'sf'
     keyword representing the number of significant figures to use.
@@ -30,11 +30,11 @@ def round(number, ndigits=None, sf=None, dp=None):
     # 'dp' overrides 'ndigits' keyword
     if ndigits is not None and dp is None:
         dp = ndigits
-    
+
     # Assume regular rounding behaviour if 'sf' not supplied
     if sf is None:
         return inbuilt_round(number, dp)
-    
+
     # Perform rounding
     intermediate = float('{:.{p}g}'.format(number, p=sf))
     if isinstance(number, int):
@@ -44,7 +44,7 @@ def round(number, ndigits=None, sf=None, dp=None):
 
 def get_overlap(*arrays):
     """Returns right-truncated arrays of largest possible common length.
-    
+
     Used for comparing timestamps of different length, e.g. raw timestamps
     vs chopper-generated individual epochs.
     """
@@ -115,7 +115,7 @@ class PeakStatistics:
         if self.mean == 0:
             return None
         return self.max / self.mean
-    
+
 def get_statistics(
     hist: list,
     resolution: Optional[float] = None,
@@ -339,20 +339,6 @@ def histogram_fft(
     return result, bins
 
 
-class LoggingCustomFormatter(logging.Formatter):
-    """Supports injection of custom name overrides during logging.
-    
-    Copied from <https://stackoverflow.com/a/71228329>.
-    """
-    def format(self, record):
-        if hasattr(record, "_funcname"):
-            record.funcName = record._funcname
-        if hasattr(record, "_filename"):
-            record.filename = record._filename
-        if hasattr(record, "_lineno"):
-            record.lineno= record._lineno
-        return super().format(record)
-
 # https://stackoverflow.com/a/23941599
 class ArgparseCustomFormatter(argparse.HelpFormatter):
     def _format_action_invocation(self, action):
@@ -386,19 +372,19 @@ def get_first_overlapping_epoch(
         dir1, dir2, first_epoch=None, return_length=False,
     ):
     """Get epoch name of smallest overlapping epoch.
-    
+
     If 'return_length' is True, the return value is a tuple of the epoch name
     and the number of continguous overlapping epochs starting from said epoch.
     """
     epochints1 = [epoch2int(fp.name) for fp in pathlib.Path(dir1).glob("*")]
     epochints2 = [epoch2int(fp.name) for fp in pathlib.Path(dir2).glob("*")]
     epochints = set(epochints1).intersection(epochints2)
-    
+
     # Exclude epochs smaller than 'first_epoch', if supplied
     if first_epoch is not None:
         epochint_first = epoch2int(first_epoch)
         epochints = set([v for v in epochints if v >= epochint_first])
-    
+
     # Calculate number of overlapping epochs
     if len(epochints) == 0:
         min_epoch = None
@@ -409,7 +395,7 @@ def get_first_overlapping_epoch(
         num_epochs = 1
         while (min_epochint + num_epochs) in epochints:
             num_epochs += 1
-    
+
     # Return result
     if return_length:
         return min_epoch, num_epochs
