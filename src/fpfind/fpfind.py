@@ -25,8 +25,9 @@ from fpfind.lib.utils import (
     get_timestamp, get_first_overlapping_epoch,
 )
 
-logger = get_logger(__name__)
+logger = get_logger(__name__, human_readable=True)
 
+PROFILE_LEVEL = 0
 def profile(f):
     """Performs a simple timing profile.
 
@@ -47,22 +48,27 @@ def profile(f):
 
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
+        global PROFILE_LEVEL
+        pad = "  " * PROFILE_LEVEL
         logger.debug(
-            "Started profiling...",
+            "%sSTART PROFILING", pad,
             stacklevel=2, extra=extras,
         )
+        PROFILE_LEVEL += 1
 
-        start = time.time()
-        result = f(*args, **kwargs)
-        end = time.time()
+        try:
+            start = time.time()
+            result = f(*args, **kwargs)
+        finally:
+            end = time.time()
+            elapsed = end - start
+            logger.debug(
+                "%sEND PROFILING: %.0f s", pad, elapsed,
+                stacklevel=2, extra=extras,
+            )
+            PROFILE_LEVEL -= 1
 
-        elapsed = end - start
-        logger.debug(
-            "Completed profiling: %.0f s", elapsed,
-            stacklevel=2, extra=extras,
-        )
         return result
-
     return wrapper
 
 
@@ -78,37 +84,32 @@ def time_freq(
     start_time = 0
     duration = num_wraps * resolution * num_bins
 
-    logger.debug(
-        "Running with 2^%d bins of width %.0f ns",
-        np.int32(np.log2(num_bins)), resolution,
-    )
+    logger.debug("  Performing peak searching...")
+    logger.debug("    Parameters:", extra={"details": [
+        f"Bins: 2^{np.int32(np.log2(num_bins)):d}",
+        f"Bin width: {resolution:.0f}ns",
+        f"Number of wraps: {num_wraps:d}",
+        f"Target resolution: {target_resolution}ns",
+    ]})
 
     # Quit if df is near zero, i.e. no need to correct
     dt = 0
     f = 1
     curr_iteration = 1
     while True:
-        logger.debug("Current fpfind iteration = %s", curr_iteration)
         logger.debug(
-            "  Alice timing range: [%s, %s]s",
-            round((ats[0] - start_time) * 1e-9, 2),
-            round((ats[-1] - start_time) * 1e-9, 2),
+            "    Iteration %s:", curr_iteration,
+            extra={"details": [
+                f"High count side timing range: [{ats[0]*1e-9:.2f}, {ats[-1]*1e-9:.2f}]s",
+                f"Low count side timing range: [{bts[0]*1e-9:.2f}, {bts[-1]*1e-9:.2f}]s",
+                f"Current resolution: {resolution:.0f}ns"
+            ]}
         )
-        logger.debug(
-            "  Bob timing range: [%s, %s]s",
-            round((bts[0] - start_time) * 1e-9, 2),
-            round((bts[-1] - start_time) * 1e-9, 2),
-        )
-        if curr_iteration == 1:
-            logger.debug("  Target resolution = %.0f ns", resolution)
-        else:
-            logger.debug("  Current resolution = %.0f ns", resolution)
 
         # Earlier cross-correlation
         logger.debug(
-            "  Performing earlier xcorr (range: [%s, %s]s)",
-            round(0, 2),
-            round((duration)*1e-9, 2),
+            "      Performing earlier xcorr (range: [0.00, %.2f]s)",
+            duration*1e-9,
         )
 
         afft = generate_fft(
@@ -121,27 +122,26 @@ def time_freq(
 
         # Confirm resolution on first run
         while curr_iteration == 1:
-            logger.debug("  Performing first peak observation")
             stats = get_statistics(ys, resolution)
-            logger.debug("    S = %6.3f, dT = %s ns", stats.significance, dt)
+            logger.debug("        Peak: S = %.3f, dT = %sns (resolution = %.0fns)", stats.significance, dt, resolution)
             if stats.significance == 0:
                 raise ValueError("Flatlined, need to increase number of bins")
             if stats.significance >= threshold:
-                logger.debug("    Peak found, with resolution %.0f ns", resolution)
+                logger.debug(f"          Accepted")
                 break
 
             # Increase the bin width
+            logger.debug(f"          Rejected")
             ys = np.sum(ys.reshape(-1, 2), axis = 1)
             resolution *= 2
-            logger.debug("    Doubling resolution to %.0f ns", resolution)
-            if resolution > 5e6:
+            if resolution > 1e4:
                 raise ValueError("Number of bins too little.")
 
         # Later cross-correlation
         logger.debug(
-            "  Performing later xcorr (range: [%s, %s]s)",
-            round((separation_duration)*1e-9, 2),
-            round((separation_duration+duration)*1e-9),
+            "      Performing earlier xcorr (range: [%.2f, %.2f]s)",
+            separation_duration*1e-9,
+            (separation_duration+duration)*1e-9,
         )
 
         _afft = generate_fft(
@@ -173,12 +173,13 @@ def time_freq(
         dt += f * dt1
         df1 = (_dt1 - dt1) / separation_duration
         f  *= (1 + df1)
-        logger.debug("  Calculate timing delays")
-        logger.debug("    early dt = %.0f ns", dt1)
-        logger.debug("    late  dt = %.0f ns", _dt1)
-        logger.debug("    current df = %.3f ppm", df1 * 1e6)
-        logger.debug("    accumulated dt = %.0f ns", dt)
-        logger.debug("    accumulated df = %.3f ppm", (f - 1) * 1e6)
+        logger.debug("      Calculated timing delays:", extra={"details": [
+            f"early dt       = {dt1:9.0f} ns",
+            f"late dt        = {_dt1:9.0f} ns",
+            f"accumulated dt = {dt:9.0f} ns",
+            f"current df     = {df1*1e6:9.4f} ppm",
+            f"accumulated df = {(f-1)*1e6:9.4f} ppm",
+        ]})
 
         # Stop if resolution met, otherwise refine resolution
         if resolution <= target_resolution:
@@ -195,9 +196,7 @@ def time_freq(
         curr_iteration += 1
 
     df = f - 1
-    logger.debug("Final result:")
-    logger.debug("  accumulated dt = %.0f ns", dt)
-    logger.debug("  accumulated df = %.3f ppm", (f - 1) * 1e6)
+    logger.debug("      Returning results.")
     return dt, df
 
 @profile
@@ -219,14 +218,11 @@ def fpfind(alice, bob,
         precompensation_max:
         precompensation_step:
     """
-    # Generating frequency precompensation values,
-    # e.g. for 10ppm, the sequence of values are:
-    # 0ppm, 10ppm, -10ppm, 20ppm, -20ppm, ...
     df0s = precompensations
 
     # Go through all precompensations
     for df0 in df0s:
-        logger.debug("Applying %.3f ppm precompensation.", df0*1e6)
+        logger.debug("  Applied initial %.4f ppm precompensation.", df0*1e6)
 
         # Apply frequency precompensation df0
         dt = 0
@@ -237,14 +233,14 @@ def fpfind(alice, bob,
                 num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
             )
         except ValueError as e:
-            logger.debug("ValueError: %s", e)
+            logger.debug("  Peak finding failed with %.4f ppm precompensation: %s", df0*1e6, e)
             continue
 
         # Refine estimates, using the same recursive relations
         # Try once more, with more gusto...!
         dt += f * dt1
         f *= (1 + df1)
-        logger.debug("Applying another %.3f ppm compensation.", df1*1e6)
+        logger.debug("  Applied another %.4f ppm compensation.", df1*1e6)
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
             num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
@@ -265,6 +261,8 @@ def fpfind(alice, bob,
         f *= (1 + df2)
         if abs(df2) <= 1e-10:
             break
+
+        logger.debug("  Applied another %.4f ppm compensation.", df2*1e6)
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
             num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
@@ -278,7 +276,8 @@ def generate_precompensations(start, stop, step) -> list:
     """Returns set of precompensations to apply before fpfind.
 
     The precompensations are in alternating positive/negative to allow
-    scanning.
+    scanning, e.g. for 10ppm, the sequence of values are:
+    0ppm, 10ppm, -10ppm, 20ppm, -20ppm, ...
 
     Examples:
         >>> generate_precompensations(0, 0, 0)
@@ -425,18 +424,18 @@ def main():
     Ta = args.initial_res * num_bins * args.num_wraps
     Ts = args.separation * Ta
     minimum_duration = (args.separation + 1) * Ta
-    logger.debug("fpfind parameters:")
-    logger.debug("  Cross-correlation duration = %.1fs", Ta * 1e-9)
-    logger.debug("  Minimum required duration: %.1fs", minimum_duration * 1e-9)
+    logger.debug("Reading timestamps...", extra={"details": [
+        f"Required duration: {minimum_duration*1e-9:.1f}s "
+        f"(cross-corr {Ta*1e-9:.1f}s)",
+    ]})
 
     # fmt: off
 
     # Obtain timestamps needed for fpfind
-    #   alice: low count side - chopper - HeadT2 - sendfiles
+    #   alice: low count side - chopper - HeadT2 - sendfiles TODO
     #   bob: high count side - chopper2 - HeadT1 - t1files
-    logger.debug("Processing timestamps")
     if args.sendfiles is not None and args.t1files is not None:
-        logger.debug("Reading from epoch directories.")
+        logger.debug("  Reading from epoch directories...")
         _is_reading_ts = False
 
         # +1 epoch specified for use as buffer for frequency compensation
@@ -447,26 +446,24 @@ def main():
             args.sendfiles, args.t1files,
             first_epoch=args.first_epoch, return_length=True,
         )
-        logger.debug("  First epoch = %s", first_epoch)
-        logger.debug("  Available epochs = %d", available_epochs)
-        logger.debug("  Reading %d epochs", required_epochs - args.skip_epochs)
-
+        logger.debug("  ", extra={"details": [
+            f"Available: {available_epochs:d} epochs "
+            f"(need {required_epochs:d})",
+            f"First epoch: {first_epoch}",
+        ]})
         if available_epochs < required_epochs:
-            logger.warning(
-                "Insufficient epochs: Need %d epochs, got %d",
-                required_epochs, available_epochs,
-            )
+            logger.warning("  Insufficient epochs")
 
         # Read epochs
         alice = get_timestamp(
             args.sendfiles, "T2",
-            first_epoch, args.skip_epochs, required_epochs-args.skip_epochs)
+            first_epoch, args.skip_epochs, required_epochs - args.skip_epochs)
         bob = get_timestamp(
             args.t1files, "T1",
-            first_epoch, args.skip_epochs, required_epochs-args.skip_epochs)
+            first_epoch, args.skip_epochs, required_epochs - args.skip_epochs)
 
     elif args.target is not None and args.reference is not None:
-        logger.debug("Reading from timestamp files.")
+        logger.info("  Reading from timestamp files...")
         _is_reading_ts = True
         alice = read_a1(args.target, legacy=args.legacy)[0]
         bob = read_a1(args.reference, legacy=args.legacy)[0]
@@ -482,28 +479,33 @@ def main():
         start_time += args.skip_duration * 1e9  # convert to ns
     alice = slice_timestamps(alice, start_time)
     bob = slice_timestamps(bob, start_time)
-
-    logger.debug("Read %d and %d events from high and low count side respectively.", len(bob), len(alice))
-    logger.debug("Timestamp durations:")
-    logger.debug("  Alice: %ss", round((alice[-1]) * 1e-9, 2))
-    logger.debug("  Bob: %ss", round((bob[-1]) * 1e-9, 2))
+    logger.debug(
+        "  Read %d and %d events from high and low count side.",
+        len(bob), len(alice), extra={"details": [
+            f"High count side duration: {round((alice[-1])*1e-9, 2)}s",
+            f"Low count side duration: {round((bob[-1])*1e-9, 2)}s",
+            f"(ignored first {start_time*1e-9:.2f}s, of which "
+            f"{args.skip_duration*1e-9:.2f}s was skipped)",
+        ]
+    })
 
     # Prepare frequency pre-compensations
     precompensations = [0]
     if args.precomp_enable:
+        logger.debug("Generating frequency precompensations...")
         precompensations = generate_precompensations(
             args.precomp_start,
             args.precomp_stop,
             args.precomp_step,
         )
         logger.debug(
-            "Prepared %d precompensation(s): %s... ppm",
+            "  Prepared %d precompensation(s): %s... ppm",
             len(precompensations),
-            ",".join(map(lambda p: f"{p:g}", precompensations[:3])),
+            ",".join(map(lambda p: f"{p*1e6:g}", precompensations[:3])),
         )
 
     # Start fpfind
-    logger.debug("Triggered fpfind main routine.")
+    logger.debug("Running fpfind...")
     td, fd = fpfind(
         alice, bob,
         num_wraps=args.num_wraps,
@@ -527,7 +529,7 @@ def main():
     elif args.output == 3:
         print(f"{fd_freqcd}\t{td_freqcd}\n")
     else:
-        logger.error("Unknown verbosity - should not happen")
+        logger.error("Unknown output flag - should not happen")
 
 if __name__ == "__main__":
     main()
