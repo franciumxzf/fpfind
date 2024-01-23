@@ -75,8 +75,8 @@ def profile(f):
 # Main algorithm
 @profile
 def time_freq(
-        ats, bts,
-        num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
+        ats, bts, num_wraps, resolution, target_resolution,
+        num_bins, threshold, separation_duration,
     ):
     """Perform """
     # TODO: Be careful of slice timestamps
@@ -139,7 +139,7 @@ def time_freq(
 
         # Later cross-correlation
         logger.debug(
-            "      Performing earlier xcorr (range: [%.2f, %.2f]s)",
+            "      Performing later xcorr (range: [%.2f, %.2f]s)",
             separation_duration*1e-9,
             (separation_duration+duration)*1e-9,
         )
@@ -174,11 +174,11 @@ def time_freq(
         df1 = (_dt1 - dt1) / separation_duration
         f  *= (1 + df1)
         logger.debug("      Calculated timing delays:", extra={"details": [
-            f"early dt       = {dt1:9.0f} ns",
-            f"late dt        = {_dt1:9.0f} ns",
-            f"accumulated dt = {dt:9.0f} ns",
-            f"current df     = {df1*1e6:9.4f} ppm",
-            f"accumulated df = {(f-1)*1e6:9.4f} ppm",
+            f"early dt       = {dt1:10.0f} ns",
+            f"late dt        = {_dt1:10.0f} ns",
+            f"accumulated dt = {dt:10.0f} ns",
+            f"current df     = {df1*1e6:10.4f} ppm",
+            f"accumulated df = {(f-1)*1e6:10.4f} ppm",
         ]})
 
         # Stop if resolution met, otherwise refine resolution
@@ -200,13 +200,13 @@ def time_freq(
     return dt, df
 
 @profile
-def fpfind(alice, bob,
-           num_wraps,
-        num_bins, separation_duration, threshold, resolution, target_resolution,
-        precompensations):
+def fpfind(
+        alice, bob, num_wraps, num_bins, separation_duration,
+        threshold, resolution, target_resolution, precompensations,
+    ):
     """Performs fpfind procedure.
 
-    'alice' and 'bob' must have starting timestamps zeroed.
+    'alice' and 'bob' must have starting timestamps zeroed. TODO.
 
     Args:
         alice: Reference timestamps, in 'a1X' format.
@@ -333,11 +333,11 @@ def main():
     # Timestamp importing arguments
     pgroup_ts = parser.add_argument_group("importing timestamps")
     pgroup_ts.add_argument(
-        "-t", "--target", metavar="",
-        help="Low-count side timestamp file, in 'a1' format")
+        "-t", "--reference", metavar="",
+        help="Timestamp file in 'a1' format, from low-count side (reference)")
     pgroup_ts.add_argument(
-        "-T", "--reference", metavar="",
-        help="High-count side timestamp file, in 'a1' format (reference)")
+        "-T", "--target", metavar="",
+        help="Timestamp file in 'a1' format, from high-count side")
     pgroup_ts.add_argument(
         "-X", "--legacy", action="store_true",
         help="Parse raw timestamps in legacy mode (default: %(default)s)")
@@ -349,10 +349,10 @@ def main():
     pgroup_ep = parser.add_argument_group("importing epochs")
     pgroup_ep.add_argument(
         "-d", "--sendfiles", metavar="",
-        help="SENDFILES")
+        help="SENDFILES, from low-count side (reference)")
     pgroup_ep.add_argument(
         "-D", "--t1files", metavar="",
-        help="T1FILES (reference)")
+        help="T1FILES, from high-count side")
     pgroup_ep.add_argument(
         "-e", "--first-epoch", metavar="",
         help="Specify filename of first overlapping epoch, optional")
@@ -381,13 +381,12 @@ def main():
         "-S", "--threshold", metavar="", type=float, default=6,
         help="Specify the statistical significance threshold (default: %(default).1f)")
     pgroup_fpfind.add_argument(
-        "-V", "--output", metavar="", type=int, default=0, choices=range(4),
-        help="Specify output verbosity, tab-delimited results: "
-            "0 = freq (abs) / "
-            "1 = freq (2^-34) / "
-            "2 = freq (abs) + time (ns) / "
-            "3 = freq (2^-34) + time (ns) "
-            "(default: %(default)d)")
+        "-V", "--output", metavar="", type=int, default=0, choices=range(8),
+        help=f"{ArgparseCustomFormatter.RAW_INDICATOR}"
+            "Specify output verbosity. Results are tab-delimited (default: %(default)d).\n"
+            "- Setting bit 0 inverts the freq and time compensations\n"
+            "- Setting bit 1 changes freq units, from abs to 2^-34\n"
+            "- Setting bit 2 adds time compensation, units of 1ns")
 
     # Frequency pre-compensation parameters
     pgroup_precomp = parser.add_argument_group("frequency precompensation")
@@ -432,7 +431,7 @@ def main():
     # fmt: off
 
     # Obtain timestamps needed for fpfind
-    #   alice: low count side - chopper - HeadT2 - sendfiles TODO
+    #   alice: low count side - chopper - HeadT2 - sendfiles (reference)
     #   bob: high count side - chopper2 - HeadT1 - t1files
     if args.sendfiles is not None and args.t1files is not None:
         logger.debug("  Reading from epoch directories...")
@@ -465,8 +464,8 @@ def main():
     elif args.target is not None and args.reference is not None:
         logger.info("  Reading from timestamp files...")
         _is_reading_ts = True
-        alice = read_a1(args.target, legacy=args.legacy)[0]
-        bob = read_a1(args.reference, legacy=args.legacy)[0]
+        alice = read_a1(args.reference, legacy=args.legacy)[0]
+        bob = read_a1(args.target, legacy=args.legacy)[0]
 
     else:
         logger.error("Timestamp files/epochs must be supplied with -tT/-dD")
@@ -482,8 +481,8 @@ def main():
     logger.debug(
         "  Read %d and %d events from high and low count side.",
         len(bob), len(alice), extra={"details": [
-            f"High count side duration: {round((alice[-1])*1e-9, 2)}s",
-            f"Low count side duration: {round((bob[-1])*1e-9, 2)}s",
+            f"Low count side duration: {round((alice[-1])*1e-9, 2)}s",
+            f"High count side duration: {round((bob[-1])*1e-9, 2)}s",
             f"(ignored first {start_time*1e-9:.2f}s, of which "
             f"{args.skip_duration*1e-9:.2f}s was skipped)",
         ]
@@ -506,7 +505,7 @@ def main():
 
     # Start fpfind
     logger.debug("Running fpfind...")
-    td, fd = fpfind(
+    dt, df = fpfind(
         alice, bob,
         num_wraps=args.num_wraps,
         num_bins=num_bins,
@@ -518,18 +517,20 @@ def main():
     )
 
     # Vary output depending output verbosity value
-    fd_freqcd = f"{round(fd * (1 << 34)):d}"
-    td_freqcd = f"{round(td):d}"
-    if args.output == 0:
-        print(f"{fd}\n")
-    elif args.output == 1:
-        print(f"{fd_freqcd}\n")
-    elif args.output == 2:
-        print(f"{fd}\t{td_freqcd}\n")
-    elif args.output == 3:
-        print(f"{fd_freqcd}\t{td_freqcd}\n")
-    else:
-        logger.error("Unknown output flag - should not happen")
+    # Invert results, i.e. 'target' and 'reference' timestamps swapped
+    # Use if the low-count side is undergoing frequency correction
+    flag = args.output
+    if flag & 0b001:
+        dt = -dt * (1 + df)    # t_alice * (1 + f_alice) + t_bob = 0
+        df = 1 / (1 + df) - 1  # (1 + f_alice) * (1 + f_bob) = 1
+    if flag & 0b010:
+        df = f"{round(df * (1 << 34)):d}"
+    output = f"{df}\t"
+    if flag & 0b100:
+        output += f"{round(dt):d}\t"
+    output = output.rstrip()
+
+    print(output, file=sys.stdout)  # newline auto-added
 
 if __name__ == "__main__":
     main()

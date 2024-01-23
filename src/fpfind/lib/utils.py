@@ -341,6 +341,9 @@ def histogram_fft(
 
 # https://stackoverflow.com/a/23941599
 class ArgparseCustomFormatter(argparse.HelpFormatter):
+
+    RAW_INDICATOR = "rawtext|"
+
     def _format_action_invocation(self, action):
         if not action.option_strings:
             _ = self._metavar_formatter(action, action.dest)(1)
@@ -366,6 +369,12 @@ class ArgparseCustomFormatter(argparse.HelpFormatter):
                     parts.append('%s' % option_string)
                 parts[-1] += ' %s'%args_string
             return ', '.join(parts)
+
+    def _split_lines(self, text, width):
+        marker = ArgparseCustomFormatter.RAW_INDICATOR
+        if text.startswith(marker):
+            return text[len(marker):].splitlines()
+        return super()._split_lines(text, width)
 
 
 def get_first_overlapping_epoch(
