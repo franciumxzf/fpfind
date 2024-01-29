@@ -128,6 +128,18 @@ def get_logger(name, level=None, human_readable=False):
     logger.setLevel(label2level(level))
     return logger
 
+def set_logfile(logger, path, human_readable=False):
+    handler = logging.FileHandler(filename=path, mode="w")
+    handler.setFormatter(
+        LoggingOverrideFormatter(
+            fmt="{asctime}\t{levelname:<7s}\t{funcName}:{lineno}\t| {message}",
+            datefmt="%Y%m%d_%H%M%S",
+            style="{",
+            human_readable=human_readable,
+        )
+    )
+    logger.addHandler(handler)
+
 def verbosity2level(verbosity):
     levels = [logging.WARNING, logging.INFO, logging.DEBUG]
     verbosity = min(verbosity, len(levels)-1)

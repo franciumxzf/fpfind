@@ -18,7 +18,7 @@ import numpy as np
 
 from fpfind.lib.parse_timestamps import read_a1
 from fpfind.lib.constants import EPOCH_LENGTH, MAX_FCORR
-from fpfind.lib.logging import get_logger, verbosity2level
+from fpfind.lib.logging import get_logger, verbosity2level, set_logfile
 from fpfind.lib.utils import (
     ArgparseCustomFormatter,
     round, generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics,
@@ -331,6 +331,9 @@ def main():
         "-v", "--verbosity", action="count", default=0,
         help="Specify debug verbosity, e.g. -vv for more verbosity")
     pgroup_config.add_argument(
+        "-L", "--logging",
+        help="Log to file, if specified. Log level follows verbosity.")
+    pgroup_config.add_argument(
         "--quiet", action="store_true",
         help="Suppress errors, but will not block logging")
     pgroup_config.add_argument(
@@ -427,6 +430,8 @@ def main():
         sys.exit(1)
 
     # Set logging level and log arguments
+    if args.logging is not None:
+        set_logfile(logger, args.logging, human_readable=True)
     logger.setLevel(verbosity2level(args.verbosity))
     logger.debug("%s", args)
 
