@@ -171,8 +171,6 @@ def generate_fft(
     arr: list,
     num_bins: int,
     time_res: float,
-    acq_start: Optional[float] = None,
-    duration: Optional[float] = None,
 ):
     """Returns the FFT and frequency resolution for the set of timestamps.
 
@@ -182,8 +180,6 @@ def generate_fft(
         arr: The timestamp series.
         num_bins: The number of bins in the time/frequency domain.
         bin_size: The size of each timing bin, in ns.
-        acq_start: The starting time, relative to the first timestamp, in ns.
-        duration: The duration to capture for the FFT, in ns.
 
     Note:
         This function is technically not cacheable due to the mutability of
@@ -191,15 +187,8 @@ def generate_fft(
     """
     if len(arr) == 0:
         raise ValueError("Array is empty!")
-    acq_start = arr[0] if acq_start is None else acq_start
-    if duration is None:
-        timespan = arr[-1] - arr[0]
-        k = np.floor(timespan / (num_bins * time_res) + 0.001)  # accomodate
-        duration = k * num_bins * time_res
-
-    new_arr = arr[np.where((arr >= acq_start) & (arr < (acq_start + duration)))]
     bin_arr = np.bincount(
-        np.int64((new_arr // time_res) % num_bins), minlength=num_bins
+        np.int64((arr // time_res) % num_bins), minlength=num_bins
     )
     return scipy.fft.rfft(bin_arr)
 
