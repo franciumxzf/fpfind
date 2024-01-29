@@ -102,7 +102,7 @@ def time_freq(
             extra={"details": [
                 f"High count side timing range: [{ats[0]*1e-9:.2f}, {ats[-1]*1e-9:.2f}]s",
                 f"Low count side timing range: [{bts[0]*1e-9:.2f}, {bts[-1]*1e-9:.2f}]s",
-                f"Current resolution: {resolution:.0f}ns"
+                f"Current resolution: {resolution:.1f}ns"
             ]}
         )
 
@@ -182,7 +182,7 @@ def time_freq(
         ]})
 
         # Stop if resolution met, otherwise refine resolution
-        if resolution <= target_resolution:
+        if resolution == target_resolution:
             break
 
         # Throw error if compensation does not fall within bounds
@@ -193,6 +193,7 @@ def time_freq(
         # TODO: Short-circuit later xcorr if frequency difference is already zero, but need to be careful when array is flatlined
         bts = (bts - dt1) / (1 + df1)
         resolution = resolution / (separation_duration / duration / np.sqrt(2))
+        resolution = max(resolution, target_resolution)
         curr_iteration += 1
 
     df = f - 1
