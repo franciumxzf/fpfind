@@ -123,7 +123,7 @@ def time_freq(
         # Confirm resolution on first run
         while curr_iteration == 1:
             stats = get_statistics(ys, resolution)
-            logger.debug("        Peak: S = %.3f, dT = %sns (resolution = %.0fns)", stats.significance, dt, resolution)
+            logger.info("        Peak: S = %.3f, dT = %sns (resolution = %.0fns)", stats.significance, dt, resolution)
             if stats.significance == 0:
                 raise ValueError("Flatlined, need to increase number of bins")
             if stats.significance >= threshold:
@@ -173,7 +173,7 @@ def time_freq(
         dt += f * dt1
         df1 = (_dt1 - dt1) / separation_duration
         f  *= (1 + df1)
-        logger.debug("      Calculated timing delays:", extra={"details": [
+        logger.info("      Calculated timing delays:", extra={"details": [
             f"early dt       = {dt1:10.0f} ns",
             f"late dt        = {_dt1:10.0f} ns",
             f"accumulated dt = {dt:10.0f} ns",
@@ -222,7 +222,7 @@ def fpfind(
 
     # Go through all precompensations
     for df0 in df0s:
-        logger.debug("  Applied initial %.4f ppm precompensation.", df0*1e6)
+        logger.info("  Applied initial %.4f ppm precompensation.", df0*1e6)
 
         # Apply frequency precompensation df0
         dt = 0
@@ -233,14 +233,14 @@ def fpfind(
                 num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
             )
         except ValueError as e:
-            logger.debug("  Peak finding failed with %.4f ppm precompensation: %s", df0*1e6, e)
+            logger.info("  Peak finding failed with %.4f ppm precompensation: %s", df0*1e6, e)
             continue
 
         # Refine estimates, using the same recursive relations
         # Try once more, with more gusto...!
         dt += f * dt1
         f *= (1 + df1)
-        logger.debug("  Applied another %.4f ppm compensation.", df1*1e6)
+        logger.info("  Applied another %.4f ppm compensation.", df1*1e6)
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
             num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
@@ -262,7 +262,7 @@ def fpfind(
         if abs(df2) <= 1e-10:
             break
 
-        logger.debug("  Applied another %.4f ppm compensation.", df2*1e6)
+        logger.info("  Applied another %.4f ppm compensation.", df2*1e6)
         dt2, df2 = time_freq(
             alice, (bob - dt)/f,
             num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
@@ -381,7 +381,7 @@ def main():
         "-S", "--threshold", metavar="", type=float, default=6,
         help="Specify the statistical significance threshold (default: %(default).1f)")
     pgroup_fpfind.add_argument(
-        "-V", "--output", metavar="", type=int, default=0, choices=range(1<<4),
+        "-V", "--output", metavar="", type=int, default=4, choices=range(1<<4),
         help=f"{ArgparseCustomFormatter.RAW_INDICATOR}"
             "Specify output verbosity. Results are tab-delimited (default: %(default)d).\n"
             "- Setting bit 0 inverts the freq and time compensations\n"
@@ -399,11 +399,11 @@ def main():
         "--precomp-start", metavar="", type=float, default=0.0,
         help="Specify the starting value (default: 0ppm)")
     pgroup_precomp.add_argument(
-        "--precomp-step", metavar="", type=float, default=5e-6,
-        help="Specify the step value (default: 5ppm)")
+        "--precomp-step", metavar="", type=float, default=0.1e-6,
+        help="Specify the step value (default: 0.1ppm)")
     pgroup_precomp.add_argument(
-        "--precomp-stop", metavar="", type=float, default=100e-6,
-        help="Specify the max scan range, one-sided (default: 100ppm)")
+        "--precomp-stop", metavar="", type=float, default=10e-6,
+        help="Specify the max scan range, one-sided (default: 10ppm)")
 
     # fmt: on
     # Parse arguments
