@@ -82,6 +82,7 @@ def time_freq(
     # TODO: Be careful of slice timestamps
     # BOOKKEEPING
     start_time = 0
+    end_time = min(ats[-1], bts[-1])
     duration = num_wraps * resolution * num_bins
 
     logger.debug("  Performing peak searching...")
@@ -112,11 +113,18 @@ def time_freq(
             duration*1e-9,
         )
 
+        # Need to calculate the exact duration to partition for given resolution
+        # Works by identifying the number of wraps for the given situation
+        max_wraps = np.floor(end_time / (resolution * num_bins))
+        _num_wraps = np.round(duration / (resolution * num_bins))
+        _num_wraps = min(_num_wraps, max_wraps)  # avoid eating extra time
+        _duration = _num_wraps * resolution * num_bins
+
         afft = generate_fft(
-            slice_timestamps(ats, start_time, duration),
+            slice_timestamps(ats, start_time, _duration),
             num_bins, resolution)
         bfft = generate_fft(
-            slice_timestamps(bts, start_time, duration),
+            slice_timestamps(bts, start_time, _duration),
             num_bins, resolution)
         ys = get_xcorr(afft, bfft)
 
@@ -141,14 +149,15 @@ def time_freq(
         logger.debug(
             "      Performing later xcorr (range: [%.2f, %.2f]s)",
             separation_duration*1e-9,
-            (separation_duration+duration)*1e-9,
+            (separation_duration+_duration)*1e-9,
         )
 
+        # TODO: Check potential overflow here
         _afft = generate_fft(
-            slice_timestamps(ats, start_time + separation_duration, duration),
+            slice_timestamps(ats, start_time + separation_duration, _duration),
             num_bins, resolution)
         _bfft = generate_fft(
-            slice_timestamps(bts, start_time + separation_duration, duration),
+            slice_timestamps(bts, start_time + separation_duration, _duration),
             num_bins, resolution)
         _ys = get_xcorr(_afft, _bfft)
 
