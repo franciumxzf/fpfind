@@ -17,7 +17,9 @@ import configargparse
 import numpy as np
 
 from fpfind.lib.parse_timestamps import read_a1
-from fpfind.lib.constants import EPOCH_LENGTH, MAX_FCORR
+from fpfind.lib.constants import (
+    EPOCH_LENGTH, MAX_FCORR, NTP_MAXDELAY_NS, PeakFindingFailed,
+)
 from fpfind.lib.logging import get_logger, verbosity2level, set_logfile
 from fpfind.lib.utils import (
     ArgparseCustomFormatter,
@@ -26,6 +28,9 @@ from fpfind.lib.utils import (
 )
 
 logger = get_logger(__name__, human_readable=True)
+
+# Controls learning rate, i.e. how much to decrease resolution by
+RES_REFINE_FACTOR = np.sqrt(2)
 
 PROFILE_LEVEL = 0
 def profile(f):
@@ -75,16 +80,33 @@ def profile(f):
 # Main algorithm
 @profile
 def time_freq(
-        ats, bts, num_wraps, resolution, target_resolution,
-        num_bins, threshold, separation_duration,
+        ats: list,
+        bts: list,
+        num_wraps: int,
+        resolution: float,
+        target_resolution: float,
+        num_bins: int,
+        threshold: float,
+        separation_duration: float,
     ):
-    """Perform """
-    # TODO: Be careful of slice timestamps
-    # BOOKKEEPING
-    start_time = 0
+    """Perform the actual frequency compensation routine.
+
+    Timestamps must already by normalized to starting time of 0ns. Whether
+    this starting time is also common reference between 'ats' and 'bts' is up to
+    implementation.
+
+    Args:
+        ats: Timestamps of reference side, in units of ns.
+        bts: Timestamps of compensating side, in units of ns.
+        num_wraps: Number of cross-correlations to overlay, usually 1.
+        resolution: Initial resolution of cross-correlation.
+        target_resolution: Target resolution desired from routine.
+        num_bins: Numbers of bins to use in the FFT.
+        threshold: Height of peak to discriminate as signal, in units of dev.
+        separation_duration: Separation of cross-correlations, in units of ns.
+    """
     end_time = min(ats[-1], bts[-1])
     duration = num_wraps * resolution * num_bins
-
     logger.debug("  Performing peak searching...")
     logger.debug("    Parameters:", extra={"details": [
         f"Bins: 2^{np.int32(np.log2(num_bins)):d}",
@@ -93,7 +115,7 @@ def time_freq(
         f"Target resolution: {target_resolution}ns",
     ]})
 
-    # Quit if df is near zero, i.e. no need to correct
+    # Refinement loop, note resolution/duration will change during loop
     dt = 0
     f = 1
     curr_iteration = 1
@@ -101,70 +123,100 @@ def time_freq(
         logger.debug(
             "    Iteration %s:", curr_iteration,
             extra={"details": [
-                f"High count side timing range: [{ats[0]*1e-9:.2f}, {ats[-1]*1e-9:.2f}]s",
-                f"Low count side timing range: [{bts[0]*1e-9:.2f}, {bts[-1]*1e-9:.2f}]s",
+                "High count side timing range: "
+                f"[{ats[0]*1e-9:.2f}, {ats[-1]*1e-9:.2f}]s",
+                "Low count side timing range: "
+                f"[{bts[0]*1e-9:.2f}, {bts[-1]*1e-9:.2f}]s",
                 f"Current resolution: {resolution:.1f}ns"
             ]}
         )
 
-        # Earlier cross-correlation
+        # Dynamically adjust 'num_wraps' based on current 'resolution',
+        # avoids event overflow/underflow
+        max_wraps = np.floor(end_time / (resolution * num_bins))
+        num_wraps = np.round(duration / (resolution * num_bins))
+        _duration = min(num_wraps, max_wraps) * resolution * num_bins
+
+        # Perform cross-correlation
         logger.debug(
             "      Performing earlier xcorr (range: [0.00, %.2f]s)",
-            duration*1e-9,
+            _duration*1e-9,
         )
-
-        # Need to calculate the exact duration to partition for given resolution
-        # Works by identifying the number of wraps for the given situation
-        max_wraps = np.floor(end_time / (resolution * num_bins))
-        _num_wraps = np.round(duration / (resolution * num_bins))
-        _num_wraps = min(_num_wraps, max_wraps)  # avoid eating extra time
-        _duration = _num_wraps * resolution * num_bins
-
-        afft = generate_fft(
-            slice_timestamps(ats, start_time, _duration),
-            num_bins, resolution)
-        bfft = generate_fft(
-            slice_timestamps(bts, start_time, _duration),
-            num_bins, resolution)
+        ats_early = slice_timestamps(ats, 0, _duration)
+        bts_early = slice_timestamps(bts, 0, _duration)
+        afft = generate_fft(ats_early, num_bins, resolution)
+        bfft = generate_fft(bts_early, num_bins, resolution)
         ys = get_xcorr(afft, bfft)
 
+        # Calculate timing delay
+        # TODO(2024-01-31): Add option to check other timing candidate.
+        xs = np.arange(num_bins) * resolution
+        dt1 = get_timing_delay_fft(ys, xs)[0]  # get smaller candidate
+        sig = get_statistics(ys, resolution).significance
+
         # Confirm resolution on first run
+        # If peak finding fails, 'dt' is not returned here:
+        # guaranteed zero during first iteration
         while curr_iteration == 1:
-            stats = get_statistics(ys, resolution)
-            logger.info("        Peak: S = %.3f, dT = %sns (resolution = %.0fns)", stats.significance, dt, resolution)
-            if stats.significance == 0:
-                raise ValueError("Flatlined, need to increase number of bins")
-            if stats.significance >= threshold:
+            logger.debug(
+                "        Peak: S = %.3f, dt = %sns (resolution = %.0fns)",
+                sig, dt1, resolution,
+            )
+
+            # Deviation zero, due flat cross-correlation
+            # Hint: Increase number of bins
+            if sig == 0:
+                raise PeakFindingFailed(
+                    "Bin saturation  ",
+                    significance=sig, resolution=resolution, dt1=dt1,
+                )
+
+            # If peak rejected, merge contiguous bins to double
+            # the resolution of the peak search
+            if sig >= threshold:
                 logger.debug(f"          Accepted")
                 break
+            else:
+                logger.debug(f"          Rejected")
+                ys = np.sum(ys.reshape(-1, 2), axis = 1)
+                resolution *= 2
 
-            # Increase the bin width
-            logger.debug(f"          Rejected")
-            ys = np.sum(ys.reshape(-1, 2), axis = 1)
-            resolution *= 2
+            # Catch runaway resolution doubling, limited by
             if resolution > 1e4:
-                raise ValueError("Number of bins too little.")
+                raise PeakFindingFailed(
+                    "Resolution OOB  ",
+                    significance=sig, resolution=resolution, dt1=dt1,
+                )
 
-        # Later cross-correlation
+            # Recalculate timing delay since resolution changed
+            xs = np.arange(len(ys)) * resolution
+            dt1 = get_timing_delay_fft(ys, xs)[0]
+            sig = get_statistics(ys, resolution).significance
+
+        # Catch if timing delay exceeded
+        if abs(dt1) > NTP_MAXDELAY_NS:
+            raise PeakFindingFailed(
+                "Time delay OOB  ",
+                significance=sig, resolution=resolution, dt1=dt1,
+            )
+
+        # TODO(2024-01-31):
+        #     Add short-circuit to ignore late xcorr
+        #     if 'df' is near zero.
         logger.debug(
             "      Performing later xcorr (range: [%.2f, %.2f]s)",
-            separation_duration*1e-9,
-            (separation_duration+_duration)*1e-9,
+            separation_duration*1e-9, (separation_duration+_duration)*1e-9,
         )
-
-        # TODO: Check potential overflow here
-        _afft = generate_fft(
-            slice_timestamps(ats, start_time + separation_duration, _duration),
-            num_bins, resolution)
-        _bfft = generate_fft(
-            slice_timestamps(bts, start_time + separation_duration, _duration),
-            num_bins, resolution)
+        ats_late = slice_timestamps(ats, separation_duration, _duration)
+        bts_late = slice_timestamps(bts, separation_duration, _duration)
+        _afft = generate_fft(ats_late, num_bins, resolution)
+        _bfft = generate_fft(bts_late, num_bins, resolution)
         _ys = get_xcorr(_afft, _bfft)
 
-        # Calculate timing delay
+        # Calculate timing delay for late set of timestamps
         xs = np.arange(num_bins) * resolution
-        dt1 = get_timing_delay_fft(ys, xs)[0]
         _dt1 = get_timing_delay_fft(_ys, xs)[0]
+
 
         # Apply recursive relations
         #   A quick proof (note dt -> t):
@@ -182,7 +234,7 @@ def time_freq(
         dt += f * dt1
         df1 = (_dt1 - dt1) / separation_duration
         f  *= (1 + df1)
-        logger.info("      Calculated timing delays:", extra={"details": [
+        logger.debug("      Calculated timing delays:", extra={"details": [
             f"early dt       = {dt1:10.0f} ns",
             f"late dt        = {_dt1:10.0f} ns",
             f"accumulated dt = {dt:10.0f} ns",
@@ -190,18 +242,21 @@ def time_freq(
             f"accumulated df = {(f-1)*1e6:10.4f} ppm",
         ]})
 
+        # Throw error if compensation does not fall within bounds
+        if abs(f - 1) >= MAX_FCORR:
+            raise PeakFindingFailed(
+                "Compensation OOB",
+                significance=sig, resolution=resolution,
+                dt1=dt1, dt2=_dt1, dt=dt, df=f-1,
+            )
+
         # Stop if resolution met, otherwise refine resolution
         if resolution == target_resolution:
             break
 
-        # Throw error if compensation does not fall within bounds
-        if abs(f - 1) >= MAX_FCORR:
-            raise ValueError("Compensation frequency diverged")
-
         # Update for next iteration
-        # TODO: Short-circuit later xcorr if frequency difference is already zero, but need to be careful when array is flatlined
         bts = (bts - dt1) / (1 + df1)
-        resolution = resolution / (separation_duration / duration / np.sqrt(2))
+        resolution /= (separation_duration / duration / RES_REFINE_FACTOR)
         resolution = max(resolution, target_resolution)
         curr_iteration += 1
 
@@ -232,7 +287,7 @@ def fpfind(
 
     # Go through all precompensations
     for df0 in df0s:
-        logger.info("  Applied initial %.4f ppm precompensation.", df0*1e6)
+        logger.debug("  Applied initial %.4f ppm precompensation.", df0*1e6)
 
         # Apply frequency precompensation df0
         dt = 0
@@ -243,7 +298,7 @@ def fpfind(
                 num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
             )
         except ValueError as e:
-            logger.info("  Peak finding failed with %.4f ppm precompensation: %s", df0*1e6, e)
+            logger.info(f"Peak finding failed, {df0*1e6:7.3f} ppm: {str(e)}")
             continue
 
         # Refine estimates, using the same recursive relations
@@ -251,38 +306,19 @@ def fpfind(
         dt += f * dt1
         f *= (1 + df1)
         logger.info("  Applied another %.4f ppm compensation.", df1*1e6)
-        dt2, df2 = time_freq(
-            alice, (bob - dt)/f,
-            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
-        )
-
-        # If frequency compensation successful, the subsequent correction
-        # will be smaller. Assume next correction less than 0.2ppm.
-        if abs(df2) <= abs(df1) and abs(df2) < 0.2e-6:
-            break
+        logger.info("Peak finding successful")
+        # TODO: Justify the good enough frequency value
+        break
 
     # No appropriate frequency compensation found
     else:
         raise ValueError("No peak found!")  # TODO
 
-    # Refine frequency estimation to +/-0.1ppb
-    while True:
-        dt += f * dt2
-        f *= (1 + df2)
-        if abs(df2) <= 1e-10:
-            break
-
-        logger.info("  Applied another %.4f ppm compensation.", df2*1e6)
-        dt2, df2 = time_freq(
-            alice, (bob - dt)/f,
-            num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
-        )
-
     df = f - 1
     return dt, df
 
 
-def generate_precompensations(start, stop, step) -> list:
+def generate_precompensations(start, stop, step, ordered=False) -> list:
     """Returns set of precompensations to apply before fpfind.
 
     The precompensations are in alternating positive/negative to allow
@@ -306,6 +342,8 @@ def generate_precompensations(start, stop, step) -> list:
     df0s[::2] *= -1
     df0s = df0s.astype(np.float64) * step
     df0s = df0s + start
+    if ordered:
+        df0s = sorted(df0s)
     return df0s
 
 
@@ -417,6 +455,9 @@ def main():
     pgroup_precomp.add_argument(
         "--precomp-stop", metavar="", type=float, default=10e-6,
         help="Specify the max scan range, one-sided (default: 10ppm)")
+    pgroup_precomp.add_argument(
+        "--precomp-ordered", action="store_true",
+        help="Test precompensations in increasing order (default: %(default)s)")
 
     # fmt: on
     # Parse arguments
@@ -433,7 +474,7 @@ def main():
     if args.logging is not None:
         set_logfile(logger, args.logging, human_readable=True)
     logger.setLevel(verbosity2level(args.verbosity))
-    logger.debug("%s", args)
+    logger.info("%s", args)
 
     # Verify minimum duration has been imported
     num_bins = (1 << args.buffer_order)
@@ -451,7 +492,7 @@ def main():
     #   alice: low count side - chopper - HeadT2 - sendfiles (reference)
     #   bob: high count side - chopper2 - HeadT1 - t1files
     if args.sendfiles is not None and args.t1files is not None:
-        logger.debug("  Reading from epoch directories...")
+        logger.info("  Reading from epoch directories...")
         _is_reading_ts = False
 
         # +1 epoch specified for use as buffer for frequency compensation
@@ -513,6 +554,7 @@ def main():
             args.precomp_start,
             args.precomp_stop,
             args.precomp_step,
+            ordered=args.precomp_ordered,
         )
         logger.debug(
             "  Prepared %d precompensation(s): %s... ppm",
