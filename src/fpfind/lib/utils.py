@@ -408,3 +408,18 @@ def get_timestamp(dirname, file_type, first_epoch, skip_epoch, num_of_epochs):
         reader = read_T1 if file_type == "T1" else read_T2
         timestamp = np.append(timestamp, reader(epoch_name)[0])
     return timestamp
+
+def normalize_timestamps(*T, skip: float = 0.0, preserve_relative: bool = True):
+    """Shifts timestamp arrays to reference zero.
+
+    Args:
+        T: List of timestamp arrays.
+        skip: Duration to skip, in seconds.
+        preserve_relative: Preserve relative durations between arrays.
+    """
+    if not preserve_relative:
+        T = [slice_timestamps(ts) for ts in T]
+
+    start_time = max([ts[0] for ts in T]) + skip*1e9  # units of ns
+    T = [slice_timestamps(ts, start_time) for ts in T]
+    return T

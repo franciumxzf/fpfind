@@ -24,7 +24,7 @@ from fpfind.lib.logging import get_logger, verbosity2level, set_logfile
 from fpfind.lib.utils import (
     ArgparseCustomFormatter,
     round, generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics,
-    get_timestamp, get_first_overlapping_epoch,
+    get_timestamp, get_first_overlapping_epoch, normalize_timestamps,
 )
 
 logger = get_logger(__name__, human_readable=True)
@@ -551,11 +551,8 @@ def main():
 
     # Normalize timestamps to common time reference near start, so that
     # frequency compensation will not shift the timing difference too far
-    start_time = max(alice[0], bob[0])
-    if _is_reading_ts:
-        start_time += args.skip_duration * 1e9  # convert to ns
-    alice = slice_timestamps(alice, start_time)
-    bob = slice_timestamps(bob, start_time)
+    skip = args.skip_duration if _is_reading_ts else 0
+    alice, bob = normalize_timestamps(alice, bob, skip=skip)
     logger.debug(
         "  Read %d and %d events from reference and compensating side.",
         len(alice), len(bob), extra={"details": [
@@ -563,8 +560,7 @@ def main():
             f"[{alice[0]*1e-9:.2f}, {alice[-1]*1e-9:.2f}]s",
             "Compensating timing range: "
             f"[{bob[0]*1e-9:.2f}, {bob[-1]*1e-9:.2f}]s",
-            f"(ignored first {start_time*1e-9:.2f}s, of which "
-            f"{args.skip_duration:.2f}s was skipped)",
+            f"(skipped {skip:.2f}s)",
         ]
     })
 
