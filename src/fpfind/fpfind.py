@@ -452,12 +452,12 @@ def main():
         "-S", "--threshold", metavar="", type=float, default=6,
         help="Specify the statistical significance threshold (default: %(default).1f)")
     pgroup_fpfind.add_argument(
-        "-V", "--output", metavar="", type=int, default=4, choices=range(1<<4),
+        "-V", "--output", metavar="", type=int, default=0, choices=range(1<<4),
         help=f"{ArgparseCustomFormatter.RAW_INDICATOR}"
             "Specify output verbosity. Results are tab-delimited (default: %(default)d).\n"
             "- Setting bit 0 inverts the freq and time compensations\n"
             "- Setting bit 1 changes freq units, from abs to 2^-34\n"
-            "- Setting bit 2 adds time compensation, units of 1ns\n"
+            "- Setting bit 2 removes time compensation\n"
             "- Setting bit 3 changes time units, from 1ns to 1/8ns"
     )
 
@@ -606,7 +606,7 @@ def main():
         dt *= 8
 
     output = f"{df}\t"
-    if flag & 0b0100:
+    if not (flag & 0b0100):
         output += f"{round(dt):d}\t"
     output = output.rstrip()
     print(output, file=sys.stdout)  # newline auto-added
