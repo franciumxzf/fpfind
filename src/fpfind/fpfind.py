@@ -121,14 +121,8 @@ def time_freq(
     curr_iteration = 1
     while True:
         logger.debug(
-            "    Iteration %s:", curr_iteration,
-            extra={"details": [
-                "High count side timing range: "
-                f"[{ats[0]*1e-9:.2f}, {ats[-1]*1e-9:.2f}]s",
-                "Low count side timing range: "
-                f"[{bts[0]*1e-9:.2f}, {bts[-1]*1e-9:.2f}]s",
-                f"Current resolution: {resolution:.1f}ns"
-            ]}
+            "    Iteration %s (r=%.1fns)",
+            curr_iteration, resolution,
         )
 
         # Dynamically adjust 'num_wraps' based on current 'resolution',
@@ -203,6 +197,9 @@ def time_freq(
         # TODO(2024-01-31):
         #     Add short-circuit to ignore late xcorr
         #     if 'df' is near zero.
+        # TODO(2024-01-31):
+        #     If signal too low, spurious peaks may occur. Implement
+        #     a mechanism to retry to obtain an alternative value.
         logger.debug(
             "      Performing later xcorr (range: [%.2f, %.2f]s)",
             separation_duration*1e-9, (separation_duration+_duration)*1e-9,
@@ -216,6 +213,30 @@ def time_freq(
         # Calculate timing delay for late set of timestamps
         xs = np.arange(num_bins) * resolution
         _dt1 = get_timing_delay_fft(_ys, xs)[0]
+        df1 = (_dt1 - dt1) / separation_duration
+
+        # Some guard rails to make sure results make sense
+        # Something went wrong with peak searching, to return intermediate
+        # results which are likely near correct values.
+        # TODO(2024-01-31): Fix this.
+        buffer = 10
+        threshold_dt = buffer*max(abs(dt), 1)
+        threshold_df = buffer*max(abs(f-1), 1e-9)
+        if curr_iteration != 1 and (
+            abs(dt1)  > threshold_dt or \
+            abs(_dt1) > threshold_dt or \
+            abs(df1)  > threshold_df
+        ):
+            logger.warning(
+                "      Interrupted due spurious signal:",
+                extra={"details": [
+                    f"early dt       = {dt1:10.0f} ns",
+                    f"late dt        = {_dt1:10.0f} ns",
+                    f"threshold dt   = {threshold_dt:10.0f} ns",
+                    f"current df     = {df1*1e6:10.4f} ppm",
+                    f"threshold df   = {threshold_df*1e6:10.4f} ppm",
+            ]})
+            break
 
 
         # Apply recursive relations
@@ -232,7 +253,6 @@ def time_freq(
         #     f' = f * fn
         #     t' = f * tn + t,  i.e. use old value of f
         dt += f * dt1
-        df1 = (_dt1 - dt1) / separation_duration
         f  *= (1 + df1)
         logger.debug("      Calculated timing delays:", extra={"details": [
             f"early dt       = {dt1:10.0f} ns",
@@ -537,12 +557,14 @@ def main():
     alice = slice_timestamps(alice, start_time)
     bob = slice_timestamps(bob, start_time)
     logger.debug(
-        "  Read %d and %d events from high and low count side.",
-        len(bob), len(alice), extra={"details": [
-            f"Low count side duration: {round((alice[-1])*1e-9, 2)}s",
-            f"High count side duration: {round((bob[-1])*1e-9, 2)}s",
+        "  Read %d and %d events from reference and compensating side.",
+        len(alice), len(bob), extra={"details": [
+            "Reference timing range: "
+            f"[{alice[0]*1e-9:.2f}, {alice[-1]*1e-9:.2f}]s",
+            "Compensating timing range: "
+            f"[{bob[0]*1e-9:.2f}, {bob[-1]*1e-9:.2f}]s",
             f"(ignored first {start_time*1e-9:.2f}s, of which "
-            f"{args.skip_duration*1e-9:.2f}s was skipped)",
+            f"{args.skip_duration:.2f}s was skipped)",
         ]
     })
 
