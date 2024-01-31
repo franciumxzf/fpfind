@@ -1,9 +1,22 @@
 #!/usr/bin/env python3
-"""TODO
+"""Calculate frequency and time offsets between two parties.
+
+The timestamps observed by either party can be either in the form of a
+timestamp file in 'a1' format as defined in the timestamp device filespec,
+or as epoch files 'T1'(t1dir)/'T2'(senddir) as defined in the qcrypto
+filespec.
+
+The time offset itself evolves over time when clock skew is present.
+Here we define the reference time as the common starting time of the
+observed timestamps of both parties, and the time offset defined at said
+reference time.
+
+To scan for possible precompensations, use the '--precomp-enable' and
+'--precomp-ordered' flags, with INFO verbosity '-v'.
 
 Changelog:
     2023-01-09, Justin: Refactoring from fpfind.py
-
+    2023-01-31, Justin: Formalize interface for fpfind.py
 """
 
 import inspect
@@ -83,9 +96,9 @@ def time_freq(
         ats: list,
         bts: list,
         num_wraps: int,
+        num_bins: int,
         resolution: float,
         target_resolution: float,
-        num_bins: int,
         threshold: float,
         separation_duration: float,
     ):
@@ -99,9 +112,9 @@ def time_freq(
         ats: Timestamps of reference side, in units of ns.
         bts: Timestamps of compensating side, in units of ns.
         num_wraps: Number of cross-correlations to overlay, usually 1.
+        num_bins: Numbers of bins to use in the FFT.
         resolution: Initial resolution of cross-correlation.
         target_resolution: Target resolution desired from routine.
-        num_bins: Numbers of bins to use in the FFT.
         threshold: Height of peak to discriminate as signal, in units of dev.
         separation_duration: Separation of cross-correlations, in units of ns.
     """
@@ -286,22 +299,37 @@ def time_freq(
 
 @profile
 def fpfind(
-        alice, bob, num_wraps, num_bins, separation_duration,
-        threshold, resolution, target_resolution, precompensations,
+        alice: list,
+        bob: list,
+        num_wraps: int,
+        num_bins: int,
+        resolution: float,
+        target_resolution: float,
+        threshold: float,
+        separation_duration: float,
+        precompensations: list,
     ):
     """Performs fpfind procedure.
 
-    'alice' and 'bob' must have starting timestamps zeroed. TODO.
+    This is effectively a wrapper to 'time_freq' that performs the actual
+    frequency compensation routine, but also includes a frequency
+    precompensation step, as well as potentially other further refinements
+    (currently unimplemented).
+
+    Timestamps must already by normalized to starting time of 0ns. Whether
+    this starting time is also common reference between 'ats' and 'bts' is up to
+    implementation.
 
     Args:
-        alice: Reference timestamps, in 'a1X' format.
-        bob: Target timestamps, in 'a1X' format.
-        duration: Acquisition duration.
-        num_bins: Number of FFT bins.
-        separation_duration: Ts
-        resolution: Timing resolution, in ns.
-        precompensation_max:
-        precompensation_step:
+        alice: Reference timestamps, in 'a1' format.
+        bob: Target timestamps, in 'a1' format.
+        num_wraps: Number of cross-correlations to overlay, usually 1.
+        num_bins: Numbers of bins to use in the FFT.
+        resolution: Initial resolution of cross-correlation.
+        target_resolution: Target resolution desired from routine.
+        threshold: Height of peak to discriminate as signal, in units of dev.
+        separation_duration: Separation of cross-correlations, in units of ns.
+        precompensations: List of precompensations to apply.
     """
     df0s = precompensations
 
@@ -315,19 +343,20 @@ def fpfind(
         try:
             dt1, df1 = time_freq(
                 alice, (bob - dt)/f,
-                num_wraps, resolution, target_resolution, num_bins, threshold, separation_duration,
+                num_wraps, num_bins, resolution, target_resolution,
+                threshold, separation_duration,
             )
         except ValueError as e:
             logger.info(f"Peak finding failed, {df0*1e6:7.3f} ppm: {str(e)}")
             continue
 
         # Refine estimates, using the same recursive relations
-        # Try once more, with more gusto...!
         dt += f * dt1
         f *= (1 + df1)
         logger.info("  Applied another %.4f ppm compensation.", df1*1e6)
         logger.info("Peak finding successful")
         # TODO: Justify the good enough frequency value
+        # TODO(2024-01-31): Add looping code to customize refinement steps.
         break
 
     # No appropriate frequency compensation found
@@ -586,10 +615,10 @@ def main():
         alice, bob,
         num_wraps=args.num_wraps,
         num_bins=num_bins,
-        separation_duration=Ts,
-        threshold=args.threshold,
         resolution=args.initial_res,
         target_resolution=args.final_res,
+        threshold=args.threshold,
+        separation_duration=Ts,
         precompensations=precompensations,
     )
 
@@ -610,6 +639,7 @@ def main():
         output += f"{round(dt):d}\t"
     output = output.rstrip()
     print(output, file=sys.stdout)  # newline auto-added
+
 
 if __name__ == "__main__":
     main()
