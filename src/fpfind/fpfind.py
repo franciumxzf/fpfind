@@ -35,12 +35,17 @@ from fpfind.lib.constants import (
 )
 from fpfind.lib.logging import get_logger, verbosity2level, set_logfile
 from fpfind.lib.utils import (
-    ArgparseCustomFormatter,
+    ArgparseCustomFormatter, parse_docstring_description,
     round, generate_fft, get_timing_delay_fft, slice_timestamps, get_xcorr, get_statistics,
     get_timestamp, get_first_overlapping_epoch, normalize_timestamps,
 )
 
 logger = get_logger(__name__, human_readable=True)
+
+# Allows quick prototyping by interrupting execution right before FFT
+# Trigger by running 'python3 -i -m fpfind.fpfind --config ... --experiment'.
+# For internal use only.
+_ENABLE_BREAKPOINT = False
 
 # Controls learning rate, i.e. how much to decrease resolution by
 RES_REFINE_FACTOR = np.sqrt(2)
@@ -132,6 +137,14 @@ def time_freq(
     dt = 0
     f = 1
     curr_iteration = 1
+
+    # Custom breakpoint for experimentation
+    if _ENABLE_BREAKPOINT:
+        import matplotlib.pyplot as plt  # for quick plotting
+        a = ats; b = bts
+        globals().update(locals())  # write all local variables to global scope
+        raise
+
     while True:
         logger.debug(
             "    Iteration %s (r=%.1fns)",
@@ -398,10 +411,11 @@ def generate_precompensations(start, stop, step, ordered=False) -> list:
 
 # fmt: on
 def main():
+    global _ENABLE_BREAKPOINT
     script_name = Path(sys.argv[0]).name
     parser = configargparse.ArgumentParser(
         default_config_files=[f"{script_name}.default.conf"],
-        description=__doc__.partition("Changelog:")[0],
+        description=parse_docstring_description(__doc__),
         formatter_class=ArgparseCustomFormatter,
         add_help=False,
     )
@@ -418,7 +432,7 @@ def main():
         "-v", "--verbosity", action="count", default=0,
         help="Specify debug verbosity, e.g. -vv for more verbosity")
     pgroup_config.add_argument(
-        "-L", "--logging",
+        "-L", "--logging", metavar="",
         help="Log to file, if specified. Log level follows verbosity.")
     pgroup_config.add_argument(
         "--quiet", action="store_true",
@@ -429,6 +443,9 @@ def main():
     pgroup_config.add_argument(
         "--save", metavar="", is_write_out_config_file_arg=True,
         help="Path to configuration file for saving, then immediately exit")
+    pgroup_config.add_argument(
+        "--experiment", action="store_true",
+        help=configargparse.SUPPRESS)
 
     # Timestamp importing arguments
     pgroup_ts = parser.add_argument_group("importing timestamps")
@@ -524,6 +541,10 @@ def main():
         set_logfile(logger, args.logging, human_readable=True)
     logger.setLevel(verbosity2level(args.verbosity))
     logger.info("%s", args)
+
+    # Set experimental mode
+    if args.experiment:
+        _ENABLE_BREAKPOINT = True
 
     # Verify minimum duration has been imported
     num_bins = (1 << args.buffer_order)

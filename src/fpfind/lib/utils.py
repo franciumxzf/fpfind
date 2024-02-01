@@ -1,6 +1,7 @@
 import argparse
 import logging
 import pathlib
+import re
 import typing
 import warnings
 from typing import Optional
@@ -329,7 +330,7 @@ def histogram_fft(
 
 
 # https://stackoverflow.com/a/23941599
-class ArgparseCustomFormatter(argparse.HelpFormatter):
+class ArgparseCustomFormatter(argparse.RawDescriptionHelpFormatter):
 
     RAW_INDICATOR = "rawtext|"
 
@@ -423,3 +424,14 @@ def normalize_timestamps(*T, skip: float = 0.0, preserve_relative: bool = True):
     start_time = max([ts[0] for ts in T]) + skip*1e9  # units of ns
     T = [slice_timestamps(ts, start_time) for ts in T]
     return T
+
+def parse_docstring_description(docstring):
+    placeholder = "~~~PLACEHOLDER~~~"
+    # Remove all changelog information
+    d = docstring.partition("Changelog:")[0]
+
+    # Replace all newlines except the first
+    d = re.sub(r"\n+", placeholder, d, count=1)
+    d = re.sub(r"\n+", " ", d)
+    d = re.sub(placeholder, "\n\n", d)
+    return d
