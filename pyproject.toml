@@ -17,6 +17,7 @@ tqdm = "^4.65.0"
 # Poetry 1.2.0a1 required for script file reference
 freqcd = {reference = "src/fpfind/freqcd", type = "file"}
 fpfind = "fpfind.fpfind:main"
+fpplot = "fpfind.fpplot:main"
 parse_timestamps = "fpfind.lib.parse_timestamps:main"
 generate_freqcd_testcase = "fpfind.lib.generate_freqcd_testcase:main"
 
