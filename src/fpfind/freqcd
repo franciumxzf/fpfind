@@ -13,7 +13,7 @@
 PROGRAM=$(ps -q $$ -o args= | awk -F ' ' '{print $2}')
 
 # Get root directory of installed library, where postinstall script is located
-ENTRYPOINT=$(python3 -c "import importlib; print(importlib.util.find_spec('fpfind').origin)")
+ENTRYPOINT=$(python3 -c "import importlib.util; print(importlib.util.find_spec('fpfind').origin)")
 INSTALL_ROOT=$(dirname "$(readlink -f ${ENTRYPOINT})")
 
 # Keep a record of program path, in case one desires a manual recompilation;
