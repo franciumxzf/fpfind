@@ -11,6 +11,7 @@ References:
 import logging
 import sys
 
+import argparse
 import matplotlib.pyplot as plt
 
 import boiler.scriptutil
@@ -23,11 +24,17 @@ from fpfind.lib.utils import (
     normalize_timestamps, slice_timestamps,
 )
 
+_ENABLE_BREAKPOINT = False
 logger = logging.getLogger(__name__)
 
 def plotter(alice, bob, freq, time, width, save=False):
     bob = (bob - time) / (1 + freq*1e-6)
     ys, xs = histogram(alice, bob, duration=width)
+    # Custom breakpoint for experimentation
+    if _ENABLE_BREAKPOINT:
+        globals().update(locals())  # write all local variables to global scope
+        raise
+
     plt.plot(xs, ys)
     plt.xlabel("Delay (ns)")
     plt.ylabel("g(2)")
@@ -35,7 +42,9 @@ def plotter(alice, bob, freq, time, width, save=False):
         plt.savefig(save)
     plt.show()
 
+
 def main():
+    global _ENABLE_BREAKPOINT
     parser = boiler.scriptutil.generate_default_parser(__doc__)
 
     # Boilerplate
@@ -58,6 +67,9 @@ def main():
     pgroup_config.add_argument(
         "--save", metavar="", is_write_out_config_file_arg=True,
         help="Path to configuration file for saving, then immediately exit")
+    pgroup_config.add_argument(
+        "--experiment", action="store_true",
+        help=argparse.SUPPRESS)
 
     # Timestamp importing arguments
     pgroup_ts = parser.add_argument_group("importing timestamps")
@@ -116,6 +128,10 @@ def main():
     boiler.logging.set_default_handlers(logger, file=args.logging)
     boiler.logging.set_logging_level(logger, args.verbosity)
     logger.debug("%s", args)
+
+    # Set experimental mode
+    if args.experiment:
+        _ENABLE_BREAKPOINT = True
 
     # Obtain timestamps needed for fpplot
     #   alice: low count side - chopper - HeadT2 - sendfiles (reference)

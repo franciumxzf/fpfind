@@ -321,6 +321,7 @@ def fpfind(
         threshold: float,
         separation_duration: float,
         precompensations: list,
+        precompensation_fullscan: bool = False,
     ):
     """Performs fpfind procedure.
 
@@ -343,6 +344,7 @@ def fpfind(
         threshold: Height of peak to discriminate as signal, in units of dev.
         separation_duration: Separation of cross-correlations, in units of ns.
         precompensations: List of precompensations to apply.
+        precompensation_fullscan: Specify whether to continue even after peak found.
     """
     df0s = precompensations
 
@@ -366,10 +368,15 @@ def fpfind(
         # Refine estimates, using the same recursive relations
         dt += f * dt1
         f *= (1 + df1)
-        logger.info("  Applied another %.4f ppm compensation.", df1*1e6)
-        logger.info("Peak finding successful")
+        logger.debug("  Applied another %.4f ppm compensation.", df1*1e6)
+        e = PeakFindingFailed(
+            "", resolution=target_resolution, dt=dt, df=f-1,
+        )
+        logger.info(f"Peak found,          {df0*1e6:7.3f} ppm: {str(e)}")
         # TODO: Justify the good enough frequency value
         # TODO(2024-01-31): Add looping code to customize refinement steps.
+        if precompensation_fullscan:
+            continue
         break
 
     # No appropriate frequency compensation found
@@ -394,18 +401,22 @@ def generate_precompensations(start, stop, step, ordered=False) -> list:
         [1, 6, -4, 11, -9]
         >>> generate_precompensations(1, 1, 5)
         [1, 6, -4]
+        >>> generate_precompensations(1, 10, 5, ordered=True)
+        [1, 6, 11]
     """
     # Zero precompensation if invalid step supplied
     if step == 0:
         return [0]
 
     # Prepare pre-compensations
-    df0s = np.arange(1, int(stop // step + 1) * 2) // 2
-    df0s[::2] *= -1
+    if ordered:
+        df0s = np.arange(0, int((stop-start) // step + 1))  # conventional
+    else:
+        df0s = np.arange(1, int(stop // step + 1) * 2) // 2  # flip-flop
+        df0s[::2] *= -1
+
     df0s = df0s.astype(np.float64) * step
     df0s = df0s + start
-    if ordered:
-        df0s = sorted(df0s)
     return df0s
 
 
@@ -524,6 +535,9 @@ def main():
     pgroup_precomp.add_argument(
         "--precomp-ordered", action="store_true",
         help="Test precompensations in increasing order (default: %(default)s)")
+    pgroup_precomp.add_argument(
+        "--precomp-fullscan", action="store_true",
+        help="Force all precompensations to be tested (default: %(default)s)")
 
     # fmt: on
     # Parse arguments
@@ -641,6 +655,7 @@ def main():
         threshold=args.threshold,
         separation_duration=Ts,
         precompensations=precompensations,
+        precompensation_fullscan=args.precomp_fullscan,
     )
 
     # Vary output depending output verbosity value
