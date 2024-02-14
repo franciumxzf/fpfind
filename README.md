@@ -1,5 +1,8 @@
 # fpfind
 
+## Note: Maintenance of this codebase has been handed over to S-Fifteen Instruments, in the following [repository](https://github.com/s-fifteen-instruments/fpfind).
+
+
 ## Usage
 
 Requirements:
